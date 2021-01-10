@@ -11,9 +11,14 @@ from modules import Encoder, Variation, Decoder
 class CVAE(nn.Module):
     def __init__(self, config, api, PAD_token=0):
         super(CVAE, self).__init__()
+        assert api.rev_vocab['<pad>'] == PAD_token
         self.vocab = api.vocab
         self.vocab_size = len(self.vocab)
+        self.embed_size = config.emb_size
+        self.hidden_size = config.n_hidden
+        self.bow_size = config.bow_size
         self.rev_vocab = api.rev_vocab
+        self.dropout = config.dropout
         self.go_id = self.rev_vocab["<s>"]
         self.eos_id = self.rev_vocab["</s>"]
         self.maxlen = config.maxlen
@@ -23,50 +28,61 @@ class CVAE(nn.Module):
         self.z_size = config.z_size
         self.init_w = config.init_weight
         self.softmax = nn.Softmax(dim=1)
+        self.bidirectional = config.bidirectional
+        self.lr_ae = config.lr_ae
 
-        self.embedder = nn.Embedding(self.vocab_size, config.emb_size, padding_idx=PAD_token)
-        # 对title, 每一句诗做编码
+        # 如果LSTM双向，则两个方向拼接在一起
+        self.encoder_output_size = self.hidden_size * (1 + int(self.bidirectional))
+        # 标题和首句拼接在一起，得到cvae的condition部分
+        self.prior_input_dim = self.encoder_output_size * 2
+        # 在prior的基础上再拼接对target的encode结果
+        self.post_input_dim = self.prior_input_dim + self.encoder_output_size
+        self.decoder_input_size = self.prior_input_dim + self.z_size
+
+        self.embedder = nn.Embedding(self.vocab_size, self.embed_size, padding_idx=PAD_token)
+        # 对title, 每一句诗做编码, 默认双向LSTM，将最终的一维拼在一起
         self.seq_encoder = Encoder(embedder=self.embedder, input_size=config.emb_size, hidden_size=config.n_hidden,
-                                   bidirectional=True, n_layers=config.n_layers, noise_radius=config.noise_radius)
-
-        # 先验网络的输入是 标题encode结果 + 上一句诗过encoder的结果 + 上一句情感过encoder的结果
-        self.prior_net = Variation(config.n_hidden*4, config.z_size, dropout_rate=config.dropout, init_weight=self.init_w)
-        # 后验网络，再加上x的2*hidden
-        # self.post_net = Variation(config.n_hidden * 6, config.z_size*2)
-        self.post_net = Variation(config.n_hidden*6, config.z_size, dropout_rate=config.dropout, init_weight=self.init_w)
+                                   bidirectional=self.bidirectional, n_layers=config.n_layers, noise_radius=config.noise_radius)
+        # 先验网络
+        self.prior_net = Variation(self.prior_input_dim, self.z_size, dropout_rate=self.dropout, init_weight=self.init_w)
+        # 后验网络
+        self.post_net = Variation(self.post_input_dim, self.z_size, dropout_rate=self.dropout, init_weight=self.init_w)
         # 词包loss的MLP
         self.bow_project = nn.Sequential(
-            nn.Linear(config.n_hidden*4 + config.z_size, 400),
+            nn.Linear(self.decoder_input_size, self.bow_size),
             nn.LeakyReLU(),
-            nn.Dropout(config.dropout),
-            nn.Linear(400, self.vocab_size)
+            nn.Dropout(self.dropout),
+            nn.Linear(self.bow_size, self.vocab_size)
         )
+        self.decoder = Decoder(embedder=self.embedder, input_size=self.embed_size,
+                               hidden_size=self.hidden_size,
+                               vocab_size=self.vocab_size, n_layers=1)
         self.init_decoder_hidden = nn.Sequential(
-            nn.Linear(config.n_hidden*4 + config.z_size, config.n_hidden),
-            nn.BatchNorm1d(config.n_hidden, eps=1e-05, momentum=0.1),
+            nn.Linear(self.decoder_input_size, self.hidden_size),
+            nn.BatchNorm1d(self.hidden_size, eps=1e-05, momentum=0.1),
             nn.LeakyReLU()
         )
         # self.post_generator = nn.Sequential(
-        #     nn.Linear(config.z_size, config.z_size),
-        #     nn.BatchNorm1d(config.z_size, eps=1e-05, momentum=0.1),
+        #     nn.Linear(self.z_size, self.z_size),
+        #     nn.BatchNorm1d(self.z_size, eps=1e-05, momentum=0.1),
         #     nn.LeakyReLU(),
-        #     nn.Linear(config.z_size, config.z_size),
-        #     nn.BatchNorm1d(config.z_size, eps=1e-05, momentum=0.1),
+        #     nn.Linear(self.z_size, self.z_size),
+        #     nn.BatchNorm1d(self.z_size, eps=1e-05, momentum=0.1),
         #     nn.LeakyReLU(),
-        #     nn.Linear(config.z_size, config.z_size)
+        #     nn.Linear(self.z_size, self.z_size)
         # )
         # self.post_generator.apply(self.init_weights)
 
         # self.prior_generator = nn.Sequential(
-        #     nn.Linear(config.z_size, config.z_size),
-        #     nn.BatchNorm1d(config.z_size, eps=1e-05, momentum=0.1),
+        #     nn.Linear(self.z_size, self.z_size),
+        #     nn.BatchNorm1d(self.z_size, eps=1e-05, momentum=0.1),
         #     nn.ReLU(),
-        #     nn.Dropout(config.dropout),
-        #     nn.Linear(config.z_size, config.z_size),
-        #     nn.BatchNorm1d(config.z_size, eps=1e-05, momentum=0.1),
+        #     nn.Dropout(self.dropout),
+        #     nn.Linear(self.z_size, self.z_size),
+        #     nn.BatchNorm1d(self.z_size, eps=1e-05, momentum=0.1),
         #     nn.ReLU(),
-        #     nn.Dropout(config.dropout),
-        #     nn.Linear(config.z_size, config.z_size)
+        #     nn.Dropout(self.dropout),
+        #     nn.Linear(self.z_size, self.z_size)
         # )
         # self.prior_generator.apply(self.init_weights)
 
@@ -74,20 +90,9 @@ class CVAE(nn.Module):
         self.bow_project.apply(self.init_weights)
         self.post_net.apply(self.init_weights)
 
-        self.decoder = Decoder(embedder=self.embedder, input_size=config.emb_size,
-                               hidden_size=config.n_hidden,
-                               vocab_size=self.vocab_size, n_layers=1)
-
         # self.optimizer_lead = optim.Adam(list(self.seq_encoder.parameters())\
-        #                                + list(self.prior_net.parameters()), lr=config.lr_lead)
-        self.optimizer_AE = optim.Adam(list(self.seq_encoder.parameters())\
-                                       + list(self.prior_net.parameters())\
-                                       # + list(self.prior_generator.parameters())
-                                       + list(self.post_net.parameters())\
-                                       # + list(self.post_generator.parameters())
-                                       + list(self.bow_project.parameters())\
-                                       + list(self.init_decoder_hidden.parameters())\
-                                       + list(self.decoder.parameters()), lr=config.lr_ae)
+        #                                + list(self.prior_net.parameters()), lr=self.lr_lead)
+        self.optimizer_AE = optim.Adam(self.parameters(), lr=self.lr_ae)
 
         # self.lr_scheduler_AE = optim.lr_scheduler.StepLR(self.optimizer_AE, step_size=10, gamma=0.6)
 
@@ -99,14 +104,7 @@ class CVAE(nn.Module):
         self.full_kl_step = kl_full_step
 
     def force_change_lr(self, new_init_lr_ae):
-        self.optimizer_AE = optim.Adam(list(self.seq_encoder.parameters()) \
-                                       + list(self.prior_net.parameters()) \
-                                       # + list(self.prior_generator.parameters())
-                                       + list(self.post_net.parameters()) \
-                                       # + list(self.post_generator.parameters())
-                                       + list(self.bow_project.parameters()) \
-                                       + list(self.init_decoder_hidden.parameters()) \
-                                       + list(self.decoder.parameters()), lr=new_init_lr_ae)
+        self.optimizer_AE = optim.Adam(self.parameters(), lr=new_init_lr_ae)
 
     def init_weights(self, m):
         if isinstance(m, nn.Linear):
@@ -127,7 +125,8 @@ class CVAE(nn.Module):
         return z, mu, logsigma
 
     def sample_code_prior(self, c, sentiment_mask=None, mask_type=None):
-        return self.prior_net(c, sentiment_mask=sentiment_mask, mask_type=mask_type)
+        # return self.prior_net(c, sentiment_mask=sentiment_mask, mask_type=mask_type)
+        return self.prior_net(c)
 
     # # input: (batch, 3)
     # # target: (batch, 3)
@@ -142,6 +141,7 @@ class CVAE(nn.Module):
     def train_AE(self, global_t, title, context, target, target_lens, sentiment_mask=None, sentiment_lead=None):
         self.seq_encoder.train()
         self.decoder.train()
+        self.optimizer_AE.zero_grad()
         # batch_size = title.size(0)
         # 每一句的情感用第二个分类器来预测，输入当前的m_hidden，输出分类结果
 
@@ -153,7 +153,8 @@ class CVAE(nn.Module):
         x, _ = self.seq_encoder(target[:, 1:], target_lens-1)
         condition_prior = torch.cat((title_last_hidden, context_last_hidden), dim=1)
 
-        z_prior, prior_mu, prior_logvar, pi, pi_final = self.sample_code_prior(condition_prior, sentiment_mask=sentiment_mask)
+        # z_prior, prior_mu, prior_logvar, pi, pi_final = self.sample_code_prior(condition_prior, sentiment_mask=sentiment_mask)
+        z_prior, prior_mu, prior_logvar = self.sample_code_prior(condition_prior, sentiment_mask=sentiment_mask)
         z_post, post_mu, post_logvar = self.sample_code_post(x, condition_prior)
         # import pdb
         # pdb.set_trace()
@@ -208,10 +209,6 @@ class CVAE(nn.Module):
         if sentiment_mask is not None:
             self.total_loss = self.total_loss * 13.33
 
-        self.optimizer_AE.zero_grad()
-        self.total_loss.backward()
-        self.optimizer_AE.step()
-
         avg_total_loss = self.total_loss.item()
         avg_lead_loss = 0 if sentiment_lead is None else self.sent_lead_loss.item()
         avg_aug_elbo_loss = self.aug_elbo_loss.item()
@@ -219,6 +216,9 @@ class CVAE(nn.Module):
         avg_rc_loss = self.rc_loss.data.item()
         avg_bow_loss = self.avg_bow_loss.item()
         global_t += 1
+
+        self.total_loss.backward()
+        self.optimizer_AE.step()
 
         return [('avg_total_loss', avg_total_loss),
                 ('avg_lead_loss', avg_lead_loss),
@@ -240,7 +240,9 @@ class CVAE(nn.Module):
         x, _ = self.seq_encoder(target[:, 1:], target_lens - 1)
         condition_prior = torch.cat((title_last_hidden, context_last_hidden), dim=1)
 
-        z_prior, prior_mu, prior_logvar, pi, pi_final = self.sample_code_prior(condition_prior, sentiment_mask=sentiment_mask)
+        # z_prior, prior_mu, prior_logvar, pi, pi_final = self.sample_code_prior(condition_prior, sentiment_mask=sentiment_mask)
+        z_prior, prior_mu, prior_logvar = self.sample_code_prior(condition_prior,
+                                                                               sentiment_mask=sentiment_mask)
         z_post, post_mu, post_logvar = self.sample_code_post(x, condition_prior)
         if sentiment_lead is not None:
             self.sent_lead_loss = self.criterion_sent_lead(input=pi, target=sentiment_lead)
@@ -290,7 +292,7 @@ class CVAE(nn.Module):
                 ('valid_aug_elbo_loss', avg_aug_elbo_loss),
                 ('valid_kl_loss', avg_kl_loss),
                 ('valid_rc_loss', avg_rc_loss),
-                ('valid_bow_loss', avg_bow_loss)], global_t
+                ('valid_bow_loss', avg_bow_loss)]
 
     # batch_size = 1 只输入了一个标题
     # test的时候，只有先验，没有后验，更没有所谓的kl散度

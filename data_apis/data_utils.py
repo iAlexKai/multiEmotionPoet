@@ -33,7 +33,7 @@ class LongDataLoader(object):
         for i in range(temp_num_batch):
             self.all_batch.append(self.data[i * self.batch_size:(i + 1) * self.batch_size])
         # 只采样sample_rate分之一的batch，总数量为len // sample_rate个batch
-        if sample_rate==1 and shuffle is False:
+        if sample_rate == 1 and shuffle is False:
             self.batch = self.all_batch
         else:
             self.batch = random.sample(self.all_batch, int(len(self.all_batch) // sample_rate))

@@ -1,11 +1,11 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <project version="4">
-  <component name="PublishConfigData" autoUpload="Always" serverName="liu@10.105.242.52:22">
+  <component name="PublishConfigData" autoUpload="Always" serverName="myk">
     <serverData>
-      <paths name="liu@10.105.242.52:22">
+      <paths name="myk">
         <serverdata>
           <mappings>
-            <mapping deploy="/home/liu/myk/cvaed_torch" local="$PROJECT_DIR$" web="/" />
+            <mapping deploy="/home/myk/multiEmotionPoet" local="$PROJECT_DIR$" web="/" />
           </mappings>
         </serverdata>
       </paths>

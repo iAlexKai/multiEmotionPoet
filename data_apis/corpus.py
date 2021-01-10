@@ -27,15 +27,16 @@ class LoadPoem(object):
                                                       # 2是处理没有sentiment引导的数据，3是处理带有sentiment引导的数据
         data = data_process.prepare_poem(Data, 68000, 2000, 2000, type=1)  # train_len, val_len, test_len
 
-        self.vocab_corpus = self.process(data["train"])
+        self.vocab_corpus = self.add_start_end_label(data["train"])
         self.build_vocab(max_vocab_cnt)
 
-        self.train_corpus = self.process(data["train"], type=1)
-        self.valid_corpus = self.process(data["valid"], type=1)
+        self.train_corpus = self.add_start_end_label(data["train"], type=1)
+        self.valid_corpus = self.add_start_end_label(data["valid"], type=1)
 
-        test_tiles = data_process.read_data(self._path_test, 1)
-        data["test"] = data_process.prepare_test_data(test_tiles)
+        test_titles = data_process.read_data(self._path_test, 1)
+        data["test"] = data_process.prepare_test_data(test_titles)
         self.test_corpus = self.process_test(data["test"])
+
 
     # 根据输入的训练对情感的不同，分布五个类别，返回一个dict
     def process_sentiment(self, sentiment_data):
@@ -52,7 +53,7 @@ class LoadPoem(object):
             new_utts_dict[sentiment].append([title, context, target, sentiment])
         return new_utts_dict
 
-    def process(self, data, type=1):
+    def add_start_end_label(self, data, type=1):
         """
         prepare training  and  validating data with starting and ending label 
         """
@@ -112,7 +113,7 @@ class LoadPoem(object):
         self.rev_vocab = {t: idx for idx, t in enumerate(self.vocab)}
         self.unk_id = self.rev_vocab["<unk>"]
 
-    def get_test_corpus(self):
+    def get_tokenized_test_corpus(self):
         def _to_id_corpus(data):
             results = []
             for line in data:
@@ -125,7 +126,7 @@ class LoadPoem(object):
         return {'test': id_test}
 
     # 返回dict，其中两元素 train和valid
-    def get_poem_corpus(self, type=1):
+    def get_tokenized_poem_corpus(self, type=1):
         def _to_id_corpus(data, type=1):
             results = []
             if type == 1:
@@ -138,8 +139,8 @@ class LoadPoem(object):
                     # pdb.set_trace()
                     results.append([[self.rev_vocab.get(t, self.unk_id) for t in line[0]],   # 题目
                                     [self.rev_vocab.get(t, self.unk_id) for t in line[1]],   # last sentence
-                                    [self.rev_vocab.get(t, self.unk_id) for t in line[2]],
-                                    line[3]])  # current sentence (target)
+                                    [self.rev_vocab.get(t, self.unk_id) for t in line[2]],   # current sentence (target)
+                                    line[3]])  # current sentence (target)                   # sentiment
             return results
         # convert the corpus into ID
         id_train = _to_id_corpus(self.train_corpus, type=type)

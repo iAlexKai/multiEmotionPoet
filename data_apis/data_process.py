@@ -185,6 +185,7 @@ def prepare_poem(data, train_lens, val_lens, test_lens, type=1):
     valid_s = []
     test_s = []
 
+    # 无情感标注的诗
     if type == 1:
         # prepare data for training
         t = ''
@@ -230,6 +231,7 @@ def prepare_poem(data, train_lens, val_lens, test_lens, type=1):
                 test_s.append([list(poem[0]), list(poem[0]), list(poem[1])[:int(len(list(poem[1]))/2)], list(poem[1])[int(len(list(poem[1]))/2):], list(poem[2])[:int(len(list(poem[2]))/2)], list(poem[2])[int(len(list(poem[2]))/2):]])
                 # line1, line2, line3, line4 is for showing groundth during, not for hinting the decoding process,
 
+    # 带有情感标注的诗
     elif type == 2:
         # prepare data for training
         t = ''
@@ -258,8 +260,6 @@ def prepare_poem(data, train_lens, val_lens, test_lens, type=1):
                                 list(poem[2])[:int(len(list(poem[1])) / 2)], list(poem[4][0])])
                 train_s.append([list(poem[0]), list(poem[2])[:int(len(list(poem[2])) / 2)],
                                 list(poem[2])[int(len(list(poem[2])) / 2):], list(poem[4][1])])
-        # import pdb
-        # pdb.set_trace()
 
         # prepare data for validating
         v = ''
