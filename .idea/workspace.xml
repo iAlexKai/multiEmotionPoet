@@ -2,13 +2,6 @@
 <project version="4">
   <component name="ChangeListManager">
     <list default="true" id="6c4d829a-a58f-452d-8be2-4544f3c7f29b" name="Default Changelist" comment="">
-      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/configs.py" beforeDir="false" afterPath="$PROJECT_DIR$/configs.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/data/test_data.txt" beforeDir="false" afterPath="$PROJECT_DIR$/data/test_data.txt" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/data_apis/corpus.py" beforeDir="false" afterPath="$PROJECT_DIR$/data_apis/corpus.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/data_apis/data_utils.py" beforeDir="false" afterPath="$PROJECT_DIR$/data_apis/data_utils.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/models/cvae.py" beforeDir="false" afterPath="$PROJECT_DIR$/models/cvae.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/modules.py" beforeDir="false" afterPath="$PROJECT_DIR$/modules.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/train.py" beforeDir="false" afterPath="$PROJECT_DIR$/train.py" afterDir="false" />
     </list>
     <option name="EXCLUDED_CONVERTED_TO_IGNORED" value="true" />
@@ -18,7 +11,7 @@
     <option name="LAST_RESOLUTION" value="IGNORE" />
   </component>
   <component name="FileEditorManager">
-    <splitter split-orientation="horizontal" split-proportion="0.36218488">
+    <splitter split-orientation="horizontal" split-proportion="0.108494535">
       <split-first>
         <leaf SIDE_TABS_SIZE_LIMIT_KEY="375">
           <file pinned="false" current-in-tab="false">
@@ -128,8 +121,8 @@
           <file pinned="false" current-in-tab="true">
             <entry file="file://$PROJECT_DIR$/train.py">
               <provider selected="true" editor-type-id="text-editor">
-                <state relative-caret-position="87">
-                  <caret line="295" column="32" lean-forward="true" selection-start-line="295" selection-start-column="32" selection-end-line="295" selection-end-column="32" />
+                <state relative-caret-position="298">
+                  <caret line="396" column="54" selection-start-line="396" selection-start-column="54" selection-end-line="396" selection-end-column="54" />
                 </state>
               </provider>
             </entry>
@@ -364,12 +357,12 @@
       <workItem from="1610166626365" duration="877000" />
       <workItem from="1610194491951" duration="15000" />
       <workItem from="1610194508693" duration="13350000" />
-      <workItem from="1610329759336" duration="3947000" />
+      <workItem from="1610329759336" duration="4416000" />
     </task>
     <servers />
   </component>
   <component name="TimeTrackingManager">
-    <option name="totallyTimeSpent" value="54885000" />
+    <option name="totallyTimeSpent" value="55354000" />
   </component>
   <component name="TodoView" selected-index="2">
     <todo-panel id="selected-file">
@@ -557,8 +550,8 @@
     </entry>
     <entry file="file://$PROJECT_DIR$/train.py">
       <provider selected="true" editor-type-id="text-editor">
-        <state relative-caret-position="87">
-          <caret line="295" column="32" lean-forward="true" selection-start-line="295" selection-start-column="32" selection-end-line="295" selection-end-column="32" />
+        <state relative-caret-position="298">
+          <caret line="396" column="54" selection-start-line="396" selection-start-column="54" selection-end-line="396" selection-end-column="54" />
         </state>
       </provider>
     </entry>

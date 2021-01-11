@@ -317,6 +317,8 @@ def main():
                     log = 'Epoch id %d: step: %d/%d: ' \
                           % (epoch_id, global_t % train_loader.num_batch, train_loader.num_batch)
                     for loss_name, loss_value in loss_records:
+                        if loss_name == 'avg_lead_loss':
+                            continue
                         log = log + loss_name + ':%.4f ' % loss_value
                         if args.visual:
                             tb_writer.add_scalar(loss_name, loss_value, epoch_id)
@@ -392,7 +394,7 @@ def train_process(global_t, model, train_loader, config, sentiment_data=False, m
         finish_train = False
         if batch is None:  # end of epoch
             finish_train = True
-            return model, finish_train, None
+            return model, finish_train, None, global_t
         title, context, target, target_lens = batch
         title, context, target, target_lens = \
             to_tensor(title), to_tensor(context), to_tensor(target), to_tensor(target_lens)
@@ -493,6 +495,8 @@ def valid_process(step, model, valid_loader, valid_config, unlabeled_epoch,
     for loss_name, loss_values in loss_records.items():
         # import pdb
         # pdb.set_trace()
+        if loss_name == 'avg_lead_loss':
+            continue
         log = log + loss_name + ':%.4f  ' % (np.mean(loss_values))
         if args.visual:
             tb_writer.add_scalar(loss_name, np.mean(loss_values), unlabeled_epoch)
