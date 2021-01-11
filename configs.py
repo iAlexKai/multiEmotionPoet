@@ -34,11 +34,11 @@ class Config(object):
     epochs = 20  # maximum number of epochs every global iter
     min_epochs = 2  # minimum number of epochs to train for
 
-    lr_ae = 1.0  # autoencoder learning rate adam
+    lr_ae = 1e-3  # autoencoder learning rate adam
     # lr_ae = 0.0003  # autoencoder learning rate adam
     beta1 = 0.9  # beta1 for adam1
     clip = 1.0  # gradient clipping, max norm
 
-    log_every = 300
-    valid_every = 300
+    log_every = 50
+    valid_every = 200
 

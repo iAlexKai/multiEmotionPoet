@@ -252,13 +252,11 @@ class SWDADataLoader(LongDataLoader):
         prepare every batch of testing data
         """
         rows = cur_grid
-        titles, headers = [], []
-
+        titles = []
+        # import pdb
+        # pdb.set_trace()
         for row in rows:
             titles.append(self.pad_to(row[0], size=self.title_size))
-
-        for i in range(4):
-            headers.append([[cur_grid[0][i+1][1]]])
 
         # 将4个list转为4个np的vector
         vec_title = np.zeros((self.batch_size, self.title_size), dtype=np.int64)
@@ -266,5 +264,4 @@ class SWDADataLoader(LongDataLoader):
         for b_id in range(self.batch_size):
             vec_title[b_id, :] = np.array(titles[b_id])
 
-        return vec_title, headers  # 返回标题和藏头
-
+        return vec_title  # 将4个vector返回给模型训练

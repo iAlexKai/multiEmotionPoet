@@ -83,19 +83,19 @@ def divide_to_sub_models():
     pass
 
 
-def save_model(model, epoch, global_iter, batch_idx, sentiment=None):
+def save_model(model, epoch, global_t, sentiment=None):
     print("Saving model")
     # for item in model.state_dict():
     #     print(item)
     # import pdb
     # pdb.set_trace()
     if sentiment is None:
-        torch.save(f='./output/{}/model_iter{}_epoch{}_batch{}.pckl'
-                   .format(args.expname, global_iter, epoch, batch_idx),
+        torch.save(f='./output/{}/model_global_t_{}_epoch{}.pckl'
+                   .format(args.expname, global_t, epoch),
                    obj=model)
     else:
         torch.save(f='./output/{}/model_iter{}_sent{}_epoch{}.pckl'
-                   .format(args.model, args.expname, global_iter,
+                   .format(args.model, args.expname, global_t,
                            sentiment+1, epoch), obj=model)
 
 
@@ -293,12 +293,11 @@ def main():
                 # train一个batch
                 model, finish_train, loss_records, global_t = \
                     train_process(global_t=global_t, model=model, train_loader=train_loader, config=config, sentiment_data=False)
-
                 if finish_train:
                     test_process(model=model, test_loader=test_loader, test_config=test_config, logger=logger)
-                    evaluate_process(model=model, valid_loader=valid_loader, logger=logger, tb_writer=tb_writer, api=api)
+                    evaluate_process(model=model, valid_loader=valid_loader, global_t=global_t, epoch=epoch_id, logger=logger, tb_writer=tb_writer, api=api)
                     # save model after each epoch
-                    save_model(model=model, epoch=epoch_id)
+                    save_model(model=model, epoch=epoch_id, global_t=global_t)
                     logger.info('Finish epoch %d, current min valid loss: %.4f \
                      correspond epoch: %d  itr: %d \n\n' % (cur_best_score['min_valid_loss'], cur_best_score['min_global_itr'],
                                    cur_best_score['min_epoch'], cur_best_score['min_itr']))
@@ -329,7 +328,7 @@ def main():
                                   unlabeled_epoch=epoch_id,  # 如果sample_rate_unlabeled不是1，这里要在最后加一个1
                                   tb_writer=tb_writer, logger=logger,
                                   cur_best_score=cur_best_score)
-                    # test_process(model=model, test_loader=test_loader, test_config=test_config, logger=logger)
+                    test_process(model=model, test_loader=test_loader, test_config=test_config, logger=logger)
                 # if batch_idx % (train_loader.num_batch // 3) == 0:
                 #     test_process(model=model, test_loader=test_loader, test_config=test_config, logger=logger)
 
@@ -384,7 +383,7 @@ def train_process(global_t, model, train_loader, config, sentiment_data=False, m
         finish_train = False
         if batch is None:  # end of epoch
             finish_train = True
-            return model, finish_train, None
+            return model, finish_train, None, global_t
         title, context, target, target_lens, sentiment_mask = batch
         title, context, target, target_lens, sentiment_mask = \
             to_tensor(title), to_tensor(context), to_tensor(target), to_tensor(target_lens), to_tensor(sentiment_mask)
@@ -401,18 +400,19 @@ def train_process(global_t, model, train_loader, config, sentiment_data=False, m
     # import pdb
     # pdb.set_trace()
     # global_t, title, context, target, target_lens,
+
     loss_AE, global_t = model.train_AE(global_t, title, context, target, target_lens)  # 输入topic，last句，当前句，当前句长度
     loss_records.extend(loss_AE)
 
     return model, finish_train, loss_records, global_t
 
 
-def evaluate_process(model, valid_loader, global_iter, epoch, logger, tb_writer, api):
+def evaluate_process(model, valid_loader, global_t, epoch, logger, tb_writer, api):
     model.eval()
     valid_loader.epoch_init(1, shuffle=False)  # batch_size是1，重复10次，计算BLEU
 
     f_eval = open(
-        "./output/{}/eval_global_{}_epoch{}.txt".format(args.expname, global_iter, epoch), "w")
+        "./output/{}/eval_global_{}_epoch{}.txt".format(args.expname, global_t, epoch), "w")
     repeat = 10
 
     # 测试当前model
@@ -444,18 +444,20 @@ def test_process(model, test_loader, test_config, logger):
     # mask_types = ['negative', 'positive', 'neutral']
     model.eval()
     output_poems = ""
+
     test_loader.epoch_init(test_config.batch_size, shuffle=False)
     while True:
         model.eval()  # eval()主要影响BatchNorm, dropout等操作
         batch = test_loader.next_batch_test()  # test data使用专门的batch
+
         if batch is None:
             break
-        title_list, headers = batch  # batch size是1，一个batch写一首诗
+        title_list = batch  # batch size是1，一个batch写一首诗
         title_tensor = to_tensor(title_list)
 
         # test函数将当前batch对应的这首诗decode出来，记住每次decode的输入context是上一次的结果
         # output_poem = 'Global iter: {}\n'.format(global_iter)
-        output_poem = model.test(title_tensor=title_tensor, title_words=title_list, headers=headers)
+        output_poem = model.test(title_tensor=title_tensor, title_words=title_list)
         output_poems += output_poem
     logger.info(output_poems)
 

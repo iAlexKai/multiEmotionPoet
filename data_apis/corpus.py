@@ -84,15 +84,12 @@ class LoadPoem(object):
         prepare testing data with starting and ending label
         """
         new_utts = []
-        for line in data:
-            tem = list()
-            tem.append(line[0])
-            tem.append(["<s>"] + [line[0][0]] + ["</s>"])
-            tem.append(["<s>"] + [line[0][1]] + ["</s>"])
-            tem.append(["<s>"] + [line[0][2]] + ["</s>"])
-            tem.append(["<s>"] + [line[0][3]] + ["</s>"])
+        for l in data:
+            tem = []
+            for sent in l:
+                tem.append(["<s>"] + sent + ["</s>"])
             new_utts.append(tem)
-        return new_utts  # 以输入的测试标题为topic，以及四句藏头
+        return new_utts  # 以输入的测试标题为topic，四句空诗
 
     def build_vocab(self, max_vocab_cnt):
         """

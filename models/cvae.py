@@ -316,7 +316,8 @@ class CVAE(nn.Module):
             title_last_hidden, _ = self.seq_encoder(title_tensor)
 
             condition_prior = torch.cat((title_last_hidden, context_last_hidden), dim=1)
-            z_prior, prior_mu, prior_logvar, _, _ = self.sample_code_prior(condition_prior, mask_type=mask_type)
+            # z_prior, prior_mu, prior_logvar, _, _ = self.sample_code_prior(condition_prior, mask_type=mask_type)
+            z_prior, prior_mu, prior_logvar = self.sample_code_prior(condition_prior, mask_type=mask_type)
             final_info = torch.cat((z_prior, condition_prior), 1)
 
             decode_words = self.decoder.testing(init_hidden=self.init_decoder_hidden(final_info), maxlen=self.maxlen, go_id=self.go_id, mode="greedy")
@@ -329,7 +330,7 @@ class CVAE(nn.Module):
             pred_tokens = [self.vocab[e] for e in decode_words[:-1] if e != self.eos_id and e != 0 and e != self.go_id]
             pred_poems.append(pred_tokens)
 
-        gen = ""
+        gen = "\n"
         for line in pred_poems:
             cur_line = " ".join(line)
             gen = gen + cur_line + '\n'
@@ -346,7 +347,8 @@ class CVAE(nn.Module):
         condition_prior = torch.cat((title_last_hidden, context_last_hidden), 1)
         condition_prior_repeat = condition_prior.expand(repeat, -1)
 
-        z_prior_repeat, _, _, _, _ = self.sample_code_prior(condition_prior_repeat)
+        # z_prior_repeat, _, _, _, _ = self.sample_code_prior(condition_prior_repeat)
+        z_prior_repeat, _, _ = self.sample_code_prior(condition_prior_repeat)
 
         final_info = torch.cat((z_prior_repeat, condition_prior_repeat), dim=1)
         sample_words, sample_lens = self.decoder.sampling(init_hidden=self.init_decoder_hidden(final_info), maxlen=self.maxlen,

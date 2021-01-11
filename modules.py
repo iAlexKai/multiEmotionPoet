@@ -456,16 +456,17 @@ class Decoder(nn.Module):
     # init_hidden (prior_z和c的cat)
     # max_len： config.maxlen 即10
     # SOS_tok: 即<s>对应的token
-    def testing(self, init_hidden, maxlen, go_id, header, mode="greedy"):
+    def testing(self, init_hidden, maxlen, go_id, mode="greedy"):
         batch_size = init_hidden.size(0)
         assert batch_size == 1
+
         decoder_input = to_tensor(torch.LongTensor([[go_id]]).view(1, 1))  # (batch, 1)
-        header_input = to_tensor(torch.LongTensor(header).view(1, 1))
         # input: (batch=1, len=1, emb_size)
         decoder_input = self.embedding(decoder_input)  # (batch, 1, emb_dim)
         # hidden: (batch=1, 2, hidden_size * 2)
         decoder_hidden = init_hidden.unsqueeze(0)  # (1, batch, 4*hidden+z_size)
         pred_outs = np.zeros((batch_size, maxlen), dtype=np.int64)
+
         for di in range(maxlen - 1):  # decode要的是从<s>后一位开始，因此总长度是max_len-1
             # 输入decoder
             decoder_output, decoder_hidden = self.rnn(decoder_input, decoder_hidden)  # (1, 1, hidden)
@@ -480,14 +481,10 @@ class Decoder(nn.Module):
             # 拿到pred_outs以返回
 
             ni = topi.squeeze().cpu().numpy()
-
+            pred_outs[:, di] = ni
             # 为下一次decode准备输入字
-            if di != 0:
-                decoder_input = self.embedding(topi)
-                pred_outs[:, di] = ni
-            # 将藏头字直接当做第一个位置
-            else:
-                decoder_input = self.embedding(header_input)
-                pred_outs[:, di] = header[0][0]
+            decoder_input = self.embedding(topi)
+
         # 结束for完成一句诗的token预测
         return pred_outs
+
