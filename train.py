@@ -83,19 +83,19 @@ def divide_to_sub_models():
     pass
 
 
-def save_model(model, epoch, global_t, sentiment=None):
+def save_model(model, epoch, log_start_time, global_t, sentiment=None):
     print("Saving model")
     # for item in model.state_dict():
     #     print(item)
     # import pdb
     # pdb.set_trace()
     if sentiment is None:
-        torch.save(f='./output/{}/model_global_t_{}_epoch{}.pckl'
-                   .format(args.expname, global_t, epoch),
+        torch.save(f='./output/{}/{}/model_global_t_{}_epoch{}.pckl'
+                   .format(args.expname, log_start_time, global_t, epoch),
                    obj=model)
     else:
-        torch.save(f='./output/{}/model_iter{}_sent{}_epoch{}.pckl'
-                   .format(args.model, args.expname, global_t,
+        torch.save(f='./output/{}/{}/model_iter{}_sent{}_epoch{}.pckl'
+                   .format(args.expname, log_start_time, global_t,
                            sentiment+1, epoch), obj=model)
 
 
@@ -192,29 +192,34 @@ def main():
     test_config.batch_size = 1
 
     # LOG #
+    log_start_time = str(datetime.now().strftime('%Y%m%d%H%M'))
     if not os.path.isdir('./output'):
         os.makedirs('./output')
     if not os.path.isdir('./output/{}'.format(args.expname)):
         os.makedirs('./output/{}'.format(args.expname))
+    if not os.path.isdir('./output/{}/{}'.format(args.expname, log_start_time)):
+        os.makedirs('./output/{}/{}'.format(args.expname, log_start_time))
 
-    cur_time = str(datetime.now().strftime('%Y%m%d%H%M'))
     # save arguments
-    json.dump(vars(args), open('./output/{}/{}_args.json'
-                               .format(args.expname, cur_time), 'w'))
+    json.dump(vars(args), open('./output/{}/{}/args.json'
+                               .format(args.expname, log_start_time), 'w'))
 
     logger = logging.getLogger(__name__)
     logging.basicConfig(level=logging.DEBUG, format="%(message)s")
-    fh = logging.FileHandler("./output/{}/logs_{}.txt"
-                      .format(args.expname, cur_time))
+    fh = logging.FileHandler("./output/{}/{}/logs.txt"
+                      .format(args.expname, log_start_time))
     # add the handlers to the logger
     logger.addHandler(fh)
     logger.info(vars(args))
+
+    tb_writer = SummaryWriter(
+        "./output/{}/{}/tb_logs".format(args.expname, log_start_time)) if args.visual else None
 
     ###############################################################################
     # Load data
     ###############################################################################
     # sentiment data path:  ../ final_data / poem_with_sentiment.txt
-    # 该path必须命令行显示输入LoadPoem，因为defaultNone
+    # 该path必须命令行显示输入LoadPoem，因为defaultNonehjk
     # 处理pretrain数据和完整诗歌数据
 
     api = LoadPoem(args.train_data_dir, args.test_data_dir, args.max_vocab_size)
@@ -276,10 +281,6 @@ def main():
         # model依然是PoemWAE_GMP保持不变，只不过，用这部分数据强制训练其中一个高斯先验分布
         # pretrain = True
 
-        tb_writer = SummaryWriter(
-            "./output/{}/{}/{}/logs/".format(args.model, args.expname, args.dataset)\
-            + datetime.now().strftime('%Y%m%d%H%M')) if args.visual else None
-
         cur_best_score = {'min_valid_loss': 100, 'min_global_itr': 0, 'min_epoch': 0, 'min_itr': 0}
 
         train_loader.epoch_init(config.batch_size, shuffle=True)
@@ -295,9 +296,9 @@ def main():
                     train_process(global_t=global_t, model=model, train_loader=train_loader, config=config, sentiment_data=False)
                 if finish_train:
                     test_process(model=model, test_loader=test_loader, test_config=test_config, logger=logger)
-                    evaluate_process(model=model, valid_loader=valid_loader, global_t=global_t, epoch=epoch_id, logger=logger, tb_writer=tb_writer, api=api)
+                    evaluate_process(model=model, valid_loader=valid_loader, log_start_time=log_start_time, global_t=global_t, epoch=epoch_id, logger=logger, tb_writer=tb_writer, api=api)
                     # save model after each epoch
-                    save_model(model=model, epoch=epoch_id, global_t=global_t)
+                    save_model(model=model, epoch=epoch_id, global_t=global_t, log_start_time=log_start_time)
                     logger.info('Finish epoch %d, current min valid loss: %.4f \
                      correspond epoch: %d  itr: %d \n\n' % (cur_best_score['min_valid_loss'], cur_best_score['min_global_itr'],
                                    cur_best_score['min_epoch'], cur_best_score['min_itr']))
@@ -321,58 +322,50 @@ def main():
                             continue
                         log = log + loss_name + ':%.4f ' % loss_value
                         if args.visual:
-                            tb_writer.add_scalar(loss_name, loss_value, epoch_id)
+                            tb_writer.add_scalar(loss_name, loss_value, global_t)
                     logger.info(log)
 
                 # valid
                 if global_t % config.valid_every == 0:
-                    valid_process(step=global_t % train_loader.num_batch, model=model, valid_loader=valid_loader, valid_config=valid_config,
+                    test_process(model=model, test_loader=test_loader, test_config=test_config, logger=logger)
+                    valid_process(global_t=global_t, model=model, valid_loader=valid_loader, valid_config=valid_config,
                                   unlabeled_epoch=epoch_id,  # 如果sample_rate_unlabeled不是1，这里要在最后加一个1
                                   tb_writer=tb_writer, logger=logger,
                                   cur_best_score=cur_best_score)
-                    test_process(model=model, test_loader=test_loader, test_config=test_config, logger=logger)
                 # if batch_idx % (train_loader.num_batch // 3) == 0:
                 #     test_process(model=model, test_loader=test_loader, test_config=test_config, logger=logger)
 
 
     # forward_only 测试
     else:
-        # test_global_list = [4, 4, 2]
-        # test_epoch_list = [21, 19, 8]
-        test_global_list = [8]
-        test_epoch_list = [20]
-        for i in range(1):
-            # import pdb
-            # pdb.set_trace()
-            model = load_model('./output/basic/header_model.pckl')
-            model.vocab = api.vocab
-            model.rev_vocab = api.rev_vocab
-            test_loader.epoch_init(test_config.batch_size, shuffle=False)
+        expname = 'cvae'
+        time = '202101111250'
 
-            last_title = None
-            while True:
-                model.eval()  # eval()主要影响BatchNorm, dropout等操作
-                batch = get_user_input(api.rev_vocab, config.title_size)
+        model = load_model('./output/{}/{}/model_global_t_13596_epoch3.pckl'.format(expname, time))
+        model.vocab = api.vocab
+        model.rev_vocab = api.rev_vocab
+        test_loader.epoch_init(test_config.batch_size, shuffle=False)
+        if not os.path.exists('./output/{}/{}/test/'.format(expname, time)):
+            os.mkdir('./output/{}/{}/test/'.format(expname, time))
+        output_file = open('./output/{}/{}/test/output.txt'
+                           .format(expname, time),
+                           'w')
+        while True:
+            model.eval()  # eval()主要影响BatchNorm, dropout等操作
+            batch = test_loader.next_batch_test()  # test data使用专门的batch
+            batch_size = test_loader.batch_size
+            if batch is None:
+                break
+            title_list = batch  # batch size是1，一个batch写一首诗
+            title_tensor = to_tensor(title_list)
+            import pdb
+            pdb.set_trace()
+            # test函数将当前batch对应的这首诗decode出来，记住每次decode的输入context是上一次的结果
 
-                # batch = test_loader.next_batch_test()  # test data使用专门的batch
-                # import pdb
-                # pdb.set_trace()
-                if batch is None:
-                    break
-
-                title_list, headers, title = batch  # batch size是1，一个batch写一首诗
-
-                if title == last_title:
-                    continue
-                last_title = title
-
-                title_tensor = to_tensor(title_list)
-
-                # test函数将当前batch对应的这首诗decode出来，记住每次decode的输入context是上一次的结果
-                output_poem = model.test(title_tensor=title_tensor, title_words=title_list, headers=headers)
-                print(output_poem)
-                print('\n')
-            print("Done testing")
+            output_poem = model.test(title_tensor, title_list, batch_size)
+            output_file.write(output_poem)
+            output_file.write('\n')
+        print("Done testing")
 
 
 def train_process(global_t, model, train_loader, config, sentiment_data=False, mask_type=None):
@@ -409,12 +402,12 @@ def train_process(global_t, model, train_loader, config, sentiment_data=False, m
     return model, finish_train, loss_records, global_t
 
 
-def evaluate_process(model, valid_loader, global_t, epoch, logger, tb_writer, api):
+def evaluate_process(model, valid_loader, log_start_time, global_t, epoch, logger, tb_writer, api):
     model.eval()
     valid_loader.epoch_init(1, shuffle=False)  # batch_size是1，重复10次，计算BLEU
 
     f_eval = open(
-        "./output/{}/eval_global_{}_epoch{}.txt".format(args.expname, global_t, epoch), "w")
+        "./output/{}/{}/eval_global_{}_epoch{}.txt".format(args.expname, log_start_time, global_t, epoch), "w")
     repeat = 10
 
     # 测试当前model
@@ -466,7 +459,7 @@ def test_process(model, test_loader, test_config, logger):
     print("Done testing")
 
 
-def valid_process(step, model, valid_loader, valid_config, unlabeled_epoch,
+def valid_process(global_t, model, valid_loader, valid_config, unlabeled_epoch,
                   tb_writer, logger, cur_best_score):
     valid_loader.epoch_init(valid_config.batch_size, shuffle=False)
     model.eval()
@@ -480,31 +473,31 @@ def valid_process(step, model, valid_loader, valid_config, unlabeled_epoch,
         title, context, target, target_lens = batch
         title, context, target, target_lens = \
             to_tensor(title), to_tensor(context), to_tensor(target), to_tensor(target_lens)
-        valid_loss = model.valid_AE(step, title, context, target, target_lens)
+        valid_loss = model.valid_AE(global_t, title, context, target, target_lens)
         for loss_name, loss_value in valid_loss:
             v = loss_records.get(loss_name, [])
             if loss_name == 'min_valid_loss' and loss_value < cur_best_score['min_valid_loss']:
                 cur_best_score['min_valid_loss'] = loss_value
                 cur_best_score['min_epoch'] = unlabeled_epoch
-                cur_best_score['min_step'] = step
+                cur_best_score['min_step'] = global_t
 
             v.append(loss_value)
             loss_records[loss_name] = v
 
-    log = '\nEpoch {} step {} Validation:'.format(unlabeled_epoch, step)
+    log = '\nEpoch {} global_t {} Validation:'.format(unlabeled_epoch, global_t)
     for loss_name, loss_values in loss_records.items():
         # import pdb
         # pdb.set_trace()
-        if loss_name == 'avg_lead_loss':
+        if loss_name == 'valid_lead_loss':
             continue
         log = log + loss_name + ':%.4f  ' % (np.mean(loss_values))
         if args.visual:
-            tb_writer.add_scalar(loss_name, np.mean(loss_values), unlabeled_epoch)
+            tb_writer.add_scalar(loss_name, np.mean(loss_values), global_t)
 
     logger.info(log)
 
 
-def valid_process_sentiment(model, valid_poem_loader, valid_config, global_iter, num,
+def valid_process_sentiment(global_t, model, valid_poem_loader, valid_config, global_iter, num,
                   tb_writer, logger, cur_best_score_labeled):
     valid_poem_loader.epoch_init(valid_config.batch_size, shuffle=False)
     model.eval()
@@ -535,7 +528,7 @@ def valid_process_sentiment(model, valid_poem_loader, valid_config, global_iter,
 
         log = log + loss_name + ':%.4f  ' % (np.mean(loss_values))
         if args.visual:
-            tb_writer.add_scalar(loss_name, np.mean(loss_values), global_iter)
+            tb_writer.add_scalar(loss_name, np.mean(loss_values), global_t)
 
     logger.info(log)
 
