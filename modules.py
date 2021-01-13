@@ -211,14 +211,16 @@ class Variation(nn.Module):
     
 
 class MixVariation(nn.Module):
-    def __init__(self, input_size, z_size, n_components, dropout_rate, init_weight):
+    def __init__(self, input_size, temp_size, z_size, n_components, dropout_rate, init_weight):
         super(MixVariation, self).__init__()
         self.input_size = input_size
-        self.z_size=z_size  
+        self.z_size=z_size
+        self.temp_size = temp_size
         self.n_components = n_components
         self.init_w = init_weight
         self.gumbel_temp = 0.1
-        
+
+        # 高斯分布选择子网
         self.pi_net = nn.Sequential(
             nn.Linear(z_size, n_components),
             nn.Dropout(dropout_rate),
@@ -227,60 +229,26 @@ class MixVariation(nn.Module):
             # nn.LeakyReLU(0.1),
             # nn.Linear(z_size, n_components)
         )
+
         self.fc = nn.Sequential(
-            nn.Linear(input_size, 1200),
-            nn.BatchNorm1d(1200, eps=1e-05, momentum=0.1),
+            nn.Linear(input_size, self.temp_size),
+            nn.BatchNorm1d(self.temp_size, eps=1e-05, momentum=0.1),
             nn.LeakyReLU(0.1),
             nn.Dropout(dropout_rate),
-            nn.Linear(1200, z_size),
+            nn.Linear(self.temp_size, z_size),
             nn.BatchNorm1d(z_size, eps=1e-05, momentum=0.1),
             nn.LeakyReLU(0.1),
             nn.Dropout(dropout_rate),
         )
-        self.context_to_mus = nn.Linear(z_size, n_components*z_size)
-        #     nn.Linear(z_size, n_components*z_size),
-        #     nn.BatchNorm1d(n_components*z_size, eps=1e-05, momentum=0.1),
-        #     nn.Tanh(),
-        #     nn.Linear(n_components*z_size, n_components*z_size),
-        #     nn.BatchNorm1d(n_components*z_size, eps=1e-05, momentum=0.1),
-        #     nn.Tanh(),
-        # )
-        # self.context_to_mu_1 = nn.Linear(z_size, z_size)
-        # self.context_to_mu_2 = nn.Linear(z_size, z_size)
-        # self.context_to_mu_3 = nn.Linear(z_size, z_size)
-        # self.context_to_mu_4 = nn.Linear(z_size, z_size)
-        # self.context_to_mu_5 = nn.Linear(z_size, z_size)
-        self.context_to_logsigmas = nn.Linear(z_size, n_components*z_size)
-        # self.context_to_logsigmas = nn.Sequential(
-        #     nn.Linear(z_size, n_components * z_size),
-        #     nn.BatchNorm1d(n_components * z_size, eps=1e-05, momentum=0.1),
-        #     nn.Tanh(),
-        #     nn.Linear(n_components * z_size, n_components * z_size),
-        #     nn.BatchNorm1d(n_components * z_size, eps=1e-05, momentum=0.1),
-        #     nn.Tanh(),
-        # )
 
-        # self.context_to_logsigma_1 = nn.Linear(z_size, z_size)
-        # self.context_to_logsigma_2 = nn.Linear(z_size, z_size)
-        # self.context_to_logsigma_3 = nn.Linear(z_size, z_size)
-        # self.context_to_logsigma_4 = nn.Linear(z_size, z_size)
-        # self.context_to_logsigma_5 = nn.Linear(z_size, z_size)
+        self.context_to_mus = nn.Linear(z_size, n_components*z_size)
+
+        self.context_to_logsigmas = nn.Linear(z_size, n_components*z_size)
 
         self.pi_net.apply(self.init_pi_net)
         self.fc.apply(self.init_weights)
         self.init_weights(self.context_to_mus)
         self.init_weights(self.context_to_logsigmas)
-
-        # self.init_weights(self.context_to_mu_1)
-        # self.init_weights(self.context_to_mu_2)
-        # self.init_weights(self.context_to_mu_3)
-        # self.init_weights(self.context_to_mu_4)
-        # self.init_weights(self.context_to_mu_5)
-        # self.init_weights(self.context_to_logsigma_1)
-        # self.init_weights(self.context_to_logsigma_2)
-        # self.init_weights(self.context_to_logsigma_3)
-        # self.init_weights(self.context_to_logsigma_4)
-        # self.init_weights(self.context_to_logsigma_5)
 
         # self.candidates_mu = [self.context_to_mu_1, self.context_to_mu_2, self.context_to_mu_3]
         #                  self.context_to_mu_4, self.context_to_mu_5]
@@ -293,7 +261,7 @@ class MixVariation(nn.Module):
 
     def init_pi_net(self, m):
         if isinstance(m, nn.Linear):
-            m.weight.data.uniform_(-0.02, 0.02)
+            m.weight.data.uniform_(-self.init_w, self.init_w)
             m.bias.data.fill_(0)
 
     # context (batch, input_size)
@@ -305,19 +273,23 @@ class MixVariation(nn.Module):
     def forward(self, context, sentiment_mask=None, mask_type=None):
         batch_size, _ = context.size()
         context = self.fc(context)
+
+        # 可以考虑先乘pi_net做筛选，再求z
         mus = self.context_to_mus(context)
         logsigmas = self.context_to_logsigmas(context)
         stds = torch.exp(0.5 * logsigmas)  # (batch, 5 * z_size)
         # epsilons (batch, 5 * z_size)
         epsilons = to_tensor(torch.randn([batch_size, self.n_components * self.z_size]))
-        zi = (epsilons * stds + mus).view(batch_size, self.n_components, self.z_size)  # (batch, 5, z_size)
+
+        zi = epsilons * stds + mus  # (batch, 5, z_size)
         pi = None
         pi_final = None
 
         if sentiment_mask is None:
-            # import pdb
-            # pdb.set_trace()
+
             if mask_type is not None:
+                # import pdb
+                # pdb.set_trace()
                 # pi = torch.zeros(batch_size, 5)
                 pi = torch.zeros(batch_size, 3)
 
@@ -345,16 +317,17 @@ class MixVariation(nn.Module):
                 pi_final = pi.cuda()
 
             else:
+
                 pi = self.pi_net(context)  # (batch, 5)
 
-                pi_hard = F.gumbel_softmax(pi, tau=self.gumbel_temp, hard=True, eps=1e-10)
-                pi_soft = F.gumbel_softmax(pi, tau=self.gumbel_temp, hard=False, eps=1e-10)
+                pi_hard = F.gumbel_softmax(pi, tau=self.gumbel_temp, hard=True)
+                pi_soft = F.gumbel_softmax(pi, tau=self.gumbel_temp, hard=False)
                 pi_final = pi_hard - pi_soft.detach() + pi_soft
 
             pi_final = pi_final.unsqueeze(1)  # (batch, 1, 5)
-            z = torch.bmm(pi_final, zi).squeeze(1)  # (batch, 1, z_size) --> (batch, z_size)
-            mu = torch.bmm(pi_final, mus.view(batch_size, self.n_components, self.z_size))  # (batch, z_size)
-            logsigma = torch.bmm(pi_final, logsigmas.view(batch_size, self.n_components, self.z_size))  # (batch, z_size)
+            z = torch.bmm(pi_final, zi.view(batch_size, self.n_components, self.z_size)).squeeze(1)  # (batch, 1, z_size) --> (batch, z_size)
+            mu = torch.bmm(pi_final, mus.view(batch_size, self.n_components, self.z_size)).squeeze(1)  # (batch, z_size)
+            logsigma = torch.bmm(pi_final, logsigmas.view(batch_size, self.n_components, self.z_size)).squeeze(1)  # (batch, z_size)
 
         else:
             # mu = self.candidates_mu[force_choice](context)  # (batch, z_size)
@@ -369,7 +342,8 @@ class MixVariation(nn.Module):
             mu = torch.bmm(sentiment_mask.float(), mus.view(batch_size, self.n_components, self.z_size))
             logsigma = torch.bmm(sentiment_mask.float(), logsigmas.view(batch_size, self.n_components, self.z_size))  # (batch, z_size)
 
-        return z, mu, logsigma, pi, pi_final
+        # return z, mu, logsigma, pi, pi_final.squeeze()
+        return z, mu, logsigma
 
     
 class Decoder(nn.Module):

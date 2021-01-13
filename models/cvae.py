@@ -124,8 +124,7 @@ class CVAE(nn.Module):
         # z = self.post_generator(z)
         return z, mu, logsigma
 
-    def sample_code_prior(self, c, sentiment_mask=None, mask_type=None):
-        # return self.prior_net(c, sentiment_mask=sentiment_mask, mask_type=mask_type)
+    def sample_code_prior(self, c):
         return self.prior_net(c)
 
     # # input: (batch, 3)
@@ -296,7 +295,7 @@ class CVAE(nn.Module):
 
     # batch_size = 1 只输入了一个标题
     # test的时候，只有先验，没有后验，更没有所谓的kl散度
-    def test(self, title_tensor, title_words, mask_type=None):
+    def test(self, title_tensor, title_words):
         self.seq_encoder.eval()
         self.decoder.eval()
         assert title_tensor.size(0) == 1
@@ -317,7 +316,7 @@ class CVAE(nn.Module):
 
             condition_prior = torch.cat((title_last_hidden, context_last_hidden), dim=1)
             # z_prior, prior_mu, prior_logvar, _, _ = self.sample_code_prior(condition_prior, mask_type=mask_type)
-            z_prior, prior_mu, prior_logvar = self.sample_code_prior(condition_prior, mask_type=mask_type)
+            z_prior, prior_mu, prior_logvar = self.sample_code_prior(condition_prior)
             final_info = torch.cat((z_prior, condition_prior), 1)
 
             decode_words = self.decoder.testing(init_hidden=self.init_decoder_hidden(final_info), maxlen=self.maxlen, go_id=self.go_id, mode="greedy")

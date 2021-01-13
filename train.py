@@ -13,6 +13,7 @@ from data_apis.corpus import LoadPoem
 from data_apis.data_utils import SWDADataLoader
 from models.seq2seq import Seq2Seq
 from models.cvae import CVAE
+from models.cvae_gmp import CVAE_GMP
 
 from helper import to_tensor, timeSince  # 将numpy转为tensor
 
@@ -34,9 +35,9 @@ parser.add_argument('--test_data_dir', type=str, default='./data/test_data.txt',
                     help='addr of data for testing, i.e. test titles')
 
 parser.add_argument('--max_vocab_size', type=int, default=10000, help='The size of the vocab, Cannot be None')
-parser.add_argument('--expname', type=str, default='cvae',
+parser.add_argument('--expname', type=str, default='gmp',
                     help='experiment name, for disinguishing different parameter settings')
-parser.add_argument('--model', type=str, default='VAE', help='name of the model')
+parser.add_argument('--model', type=str, default='mCVAE', help='name of the model')
 parser.add_argument('--visual', action='store_true', default=False, help='visualize training status in tensorboard')
 parser.add_argument('--reload_from', type=int, default=-1, help='reload from a trained ephoch')
 parser.add_argument('--gpu_id', type=int, default=0, help='GPU ID')
@@ -263,10 +264,12 @@ def main():
         # pretrain时，用特定数据训练特定的高斯分布
         # 不用pretrain时，用大数据训练高斯混合分布
 
-        if args.model == "Seq2Seq":
-            model = Seq2Seq(config=config, api=api)
-        else:
+        if args.model == "mCVAE":
+            model = CVAE_GMP(config=config, api=api)
+        elif args.model == 'CVAE':
             model = CVAE(config=config, api=api)
+        else:
+            model = Seq2Seq(config=config, api=api)
 
         if use_cuda:
             model = model.cuda()
@@ -338,8 +341,8 @@ def main():
 
     # forward_only 测试
     else:
-        expname = 'cvae'
-        time = '202101111250'
+        expname = 'gmp'
+        time = '202101131456'
 
         model = load_model('./output/{}/{}/model_global_t_13596_epoch3.pckl'.format(expname, time))
         model.vocab = api.vocab
@@ -358,13 +361,14 @@ def main():
                 break
             title_list = batch  # batch size是1，一个batch写一首诗
             title_tensor = to_tensor(title_list)
-            import pdb
-            pdb.set_trace()
             # test函数将当前batch对应的这首诗decode出来，记住每次decode的输入context是上一次的结果
-
-            output_poem = model.test(title_tensor, title_list, batch_size)
-            output_file.write(output_poem)
-            output_file.write('\n')
+            for i in range(3):
+                import pdb
+                pdb.set_trace()
+                output_file.write("Gaussian No.{}\n".format(i))
+                output_poem = model.test(title_tensor, title_list, mask_type=str(i))
+                output_file.write(output_poem)
+                output_file.write('\n')
         print("Done testing")
 
 

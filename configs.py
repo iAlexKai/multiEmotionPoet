@@ -18,13 +18,11 @@ class Config(object):
     full_kl_step = 10000
 
     init_weight = 0.02   # uniform random from [-init_w, init_w]
-
     # lambda_gp = 10  # Gradient penalty lambda hyperparameter.  调小 调大,控制penalty的倍数
     # n_d_loss = 1  # 控制discriminator的loss倍数
     # lr_gan_g = 5e-05
     # lr_gan_d = 1e-05
     # n_iters_d = 5
-
     temp = 1.0  # softmax temperature (lower --> more discrete)
 
     dropout = 0.3  # dropout applied to layers (0 = no dropout)
@@ -41,4 +39,10 @@ class Config(object):
 
     log_every = 50
     valid_every = 200
+
+    # Gaussian Mixture Prior Network
+    gumbel_temp = 1
+    n_prior_components = 3
+    temp_size = 800
+
 
