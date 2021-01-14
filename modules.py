@@ -284,7 +284,8 @@ class MixVariation(nn.Module):
         zi = epsilons * stds + mus  # (batch, 5, z_size)
         pi = None
         pi_final = None
-
+        # import pdb
+        # pdb.set_trace()
         if sentiment_mask is None:
 
             if mask_type is not None:
@@ -335,10 +336,11 @@ class MixVariation(nn.Module):
             # std = torch.exp(0.5 * logsigma)  # (batch, z_size)
             # epsilon = to_tensor(torch.randn([batch_size, self.z_size]))
             # z = epsilon * std + mu  # (batch, z_size)
+
+            sentiment_mask = sentiment_mask.unsqueeze(1)
             # import pdb
             # pdb.set_trace()
-            sentiment_mask = sentiment_mask.unsqueeze(1)
-            z = torch.bmm(sentiment_mask.float(), zi).squeeze(1)
+            z = torch.bmm(sentiment_mask.float(), zi.view(batch_size, self.n_components, self.z_size)).squeeze(1)
             mu = torch.bmm(sentiment_mask.float(), mus.view(batch_size, self.n_components, self.z_size))
             logsigma = torch.bmm(sentiment_mask.float(), logsigmas.view(batch_size, self.n_components, self.z_size))  # (batch, z_size)
 

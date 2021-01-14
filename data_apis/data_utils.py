@@ -208,27 +208,21 @@ class SWDADataLoader(LongDataLoader):
             return
 
     def _prepare_sentiment_batch(self, cur_grid):
+
         rows = cur_grid  # 当前batch
         titles, context_utts, out_utts, out_lens, out_sentiment_mask = [], [], [], [], []  # 初始化4个list
         for row in rows:  # 遍历当前batch中的每一个训练样本
             title = row[0]  # 取标题
             in_row = row[1]  # 取输入句
             out_utt = row[2]  # 取输出句
-            out_sentiment = int(row[3])-1
+            out_sentiment = row[3]
             # 分布append到当前batch的标题list、输入句（也可以理解为context）list、输出句list，并将len append到输出句长度list
             titles.append(self.pad_to(title, size=self.title_size))
             context_utts.append(self.pad_to(in_row, size=self.max_utt_size))
             out_utt = self.pad_to(out_utt, size=self.max_utt_size)
             out_utts.append(out_utt)
             out_lens.append(len(out_utt))
-            # out_sentiment_mask.append(out_sentiment)
-
-            if out_sentiment == 0 or out_sentiment == 1:
-                out_sentiment_mask.append(0)
-            elif out_sentiment == 3 or out_sentiment == 4:
-                out_sentiment_mask.append(2)
-            else:
-                out_sentiment_mask.append(1)
+            out_sentiment_mask.append(out_sentiment)
 
         # 将4个list转为4个np的vector
         vec_title = np.zeros((self.batch_size, self.title_size), dtype=np.int64)

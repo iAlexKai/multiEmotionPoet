@@ -124,7 +124,7 @@ class CVAE(nn.Module):
         # z = self.post_generator(z)
         return z, mu, logsigma
 
-    def sample_code_prior(self, c):
+    def sample_code_prior(self, c, sentiment_mask=None):
         return self.prior_net(c)
 
     # # input: (batch, 3)
@@ -157,10 +157,10 @@ class CVAE(nn.Module):
         z_post, post_mu, post_logvar = self.sample_code_post(x, condition_prior)
         # import pdb
         # pdb.set_trace()
-        if sentiment_lead is not None:
-            self.sent_lead_loss = self.criterion_sent_lead(input=pi, target=sentiment_lead)
-        else:
-            self.sent_lead_loss = 0
+        # if sentiment_lead is not None:
+        #     self.sent_lead_loss = self.criterion_sent_lead(input=pi, target=sentiment_lead)
+        # else:
+        self.sent_lead_loss = 0
 
         # if sentiment_lead is not None:
         #     self.optimizer_lead.zero_grad()

@@ -79,6 +79,7 @@ def read_data(filename, type):
 
     elif type == 3:
         for line in File:
+
             line = line.strip()
             _line = line.split('\t')
             title = _line[0]

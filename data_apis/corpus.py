@@ -7,8 +7,8 @@ import data_apis.data_process as data_process
 
 class LoadPoem(object):
     # 即便是做align实验，vocab也不能变，必须和原先完全一样，因此build vocab所使用的的数据集还是之前的train数据集
-    def __init__(self, corpus_path, test_path,  max_vocab_cnt, sentiment_path=None,
-                 test_align=False, word2vec=None, word2vec_dim=None):
+    def __init__(self, corpus_path, test_path,  max_vocab_cnt, with_sentiment=False,
+                 word2vec=None, word2vec_dim=None):
         """
         the folder that contains the demo data
         """
@@ -17,26 +17,18 @@ class LoadPoem(object):
         self.word_vec_path = word2vec
         self.word2vec_dim = word2vec_dim
         self.word2vec = None
-        self.sentiment_path = sentiment_path
         self.unk_id = None
 
-        if test_align:
-            assert sentiment_path is not None
-
-        Data = data_process.read_data(self._path, type=2)  # 从txt文件中读出数据，utf-8编码后放到一个大list里；
-                                                      # 2是处理没有sentiment引导的数据，3是处理带有sentiment引导的数据
-        data = data_process.prepare_poem(Data, 68000, 2000, 2000, type=1)  # train_len, val_len, test_len
+        Data = data_process.read_data(self._path, type=2+int(with_sentiment))
+        data = data_process.prepare_poem(Data, 68000, 2000, 2000, type=1+int(with_sentiment))  # train_len, val_len, test_len
+        self.train_corpus = self.add_start_end_label(data["train"], type=1+int(with_sentiment))
+        self.valid_corpus = self.add_start_end_label(data["valid"], type=1+int(with_sentiment))
 
         self.vocab_corpus = self.add_start_end_label(data["train"])
         self.build_vocab(max_vocab_cnt)
-
-        self.train_corpus = self.add_start_end_label(data["train"], type=1)
-        self.valid_corpus = self.add_start_end_label(data["valid"], type=1)
-
-        test_titles = data_process.read_data(self._path_test, 1)
+        test_titles = data_process.read_data(self._path_test, type=1)
         data["test"] = data_process.prepare_test_data(test_titles)
         self.test_corpus = self.process_test(data["test"])
-
 
     # 根据输入的训练对情感的不同，分布五个类别，返回一个dict
     def process_sentiment(self, sentiment_data):
@@ -133,11 +125,10 @@ class LoadPoem(object):
                                     [self.rev_vocab.get(t, self.unk_id) for t in line[2]]])  # current sentence (target)
             else:
                 for line in data:
-                    # pdb.set_trace()
                     results.append([[self.rev_vocab.get(t, self.unk_id) for t in line[0]],   # 题目
                                     [self.rev_vocab.get(t, self.unk_id) for t in line[1]],   # last sentence
                                     [self.rev_vocab.get(t, self.unk_id) for t in line[2]],   # current sentence (target)
-                                    line[3]])  # current sentence (target)                   # sentiment
+                                    int(line[3][0])])  # current sentence (target)           # sentiment
             return results
         # convert the corpus into ID
         id_train = _to_id_corpus(self.train_corpus, type=type)

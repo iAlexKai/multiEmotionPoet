@@ -41,6 +41,7 @@ class Config(object):
     valid_every = 200
 
     # Gaussian Mixture Prior Network
+    with_sentiment=True
     gumbel_temp = 1
     n_prior_components = 3
     temp_size = 800

@@ -27,15 +27,19 @@ sys.path.insert(0, parentPath)# add parent folder to path so as to import common
 
 parser = argparse.ArgumentParser(description='headHider Pytorch')
 
-# 大古诗数据集
-parser.add_argument('--train_data_dir', type=str, default='./data/train_data.txt',
-                    help='addr of data corpus for train and valid')
+# # 大古诗数据集
+# parser.add_argument('--train_data_dir', type=str, default='./data/train_data.txt',
+#                     help='addr of data corpus for train and valid')
+
+# 大古诗及预测情感后的数据集
+parser.add_argument('--train_data_dir', type=str, default='./data/train_data_with_sent.txt',
+                    help='train data with the predicted sentiments')
 
 parser.add_argument('--test_data_dir', type=str, default='./data/test_data.txt',
                     help='addr of data for testing, i.e. test titles')
 
 parser.add_argument('--max_vocab_size', type=int, default=10000, help='The size of the vocab, Cannot be None')
-parser.add_argument('--expname', type=str, default='gmp',
+parser.add_argument('--expname', type=str, default='sentPoems',
                     help='experiment name, for disinguishing different parameter settings')
 parser.add_argument('--model', type=str, default='mCVAE', help='name of the model')
 parser.add_argument('--visual', action='store_true', default=False, help='visualize training status in tensorboard')
@@ -192,6 +196,8 @@ def main():
     test_config.dropout = 0
     test_config.batch_size = 1
 
+    with_sentiment = config.with_sentiment
+
     # LOG #
     log_start_time = str(datetime.now().strftime('%Y%m%d%H%M'))
     if not os.path.isdir('./output'):
@@ -223,10 +229,12 @@ def main():
     # 该path必须命令行显示输入LoadPoem，因为defaultNonehjk
     # 处理pretrain数据和完整诗歌数据
 
-    api = LoadPoem(args.train_data_dir, args.test_data_dir, args.max_vocab_size)
+    # api = LoadPoem(args.train_data_dir, args.test_data_dir, args.max_vocab_size)
+    api = LoadPoem(corpus_path=args.train_data_dir, test_path=args.test_data_dir, max_vocab_cnt=args.max_vocab_size,
+                   with_sentiment=with_sentiment)
 
     # 交替训练，准备大数据集
-    poem_corpus = api.get_tokenized_poem_corpus()  # corpus for training and validation
+    poem_corpus = api.get_tokenized_poem_corpus(type=1+int(with_sentiment))  # corpus for training and validation
     test_data = api.get_tokenized_test_corpus()  # 测试数据
     # 三个list，每个list中的每一个元素都是 [topic, last_sentence, current_sentence]
     train_poem, valid_poem, test_poem = poem_corpus["train"], poem_corpus["valid"], test_data["test"]
@@ -296,7 +304,7 @@ def main():
             while True:  # loop through all batches in training data
                 # train一个batch
                 model, finish_train, loss_records, global_t = \
-                    train_process(global_t=global_t, model=model, train_loader=train_loader, config=config, sentiment_data=False)
+                    train_process(global_t=global_t, model=model, train_loader=train_loader, config=config, sentiment_data=with_sentiment)
                 if finish_train:
                     test_process(model=model, test_loader=test_loader, test_config=test_config, logger=logger)
                     evaluate_process(model=model, valid_loader=valid_loader, log_start_time=log_start_time, global_t=global_t, epoch=epoch_id, logger=logger, tb_writer=tb_writer, api=api)
@@ -363,8 +371,8 @@ def main():
             title_tensor = to_tensor(title_list)
             # test函数将当前batch对应的这首诗decode出来，记住每次decode的输入context是上一次的结果
             for i in range(3):
-                import pdb
-                pdb.set_trace()
+                # import pdb
+                # pdb.set_trace()
                 output_file.write("Gaussian No.{}\n".format(i))
                 output_poem = model.test(title_tensor, title_list, mask_type=str(i))
                 output_file.write(output_poem)
@@ -377,7 +385,6 @@ def train_process(global_t, model, train_loader, config, sentiment_data=False, m
     loss_records = []
     sentiment_mask = None
     if sentiment_data:
-
         batch = train_loader.next_sentiment_batch()
         finish_train = False
         if batch is None:  # end of epoch
@@ -396,11 +403,8 @@ def train_process(global_t, model, train_loader, config, sentiment_data=False, m
         title, context, target, target_lens = \
             to_tensor(title), to_tensor(context), to_tensor(target), to_tensor(target_lens)
 
-    # import pdb
-    # pdb.set_trace()
     # global_t, title, context, target, target_lens,
-
-    loss_AE, global_t = model.train_AE(global_t, title, context, target, target_lens)  # 输入topic，last句，当前句，当前句长度
+    loss_AE, global_t = model.train_AE(global_t, title, context, target, target_lens, sentiment_mask=sentiment_mask)  # 输入topic，last句，当前句，当前句长度
     loss_records.extend(loss_AE)
 
     return model, finish_train, loss_records, global_t
@@ -453,11 +457,12 @@ def test_process(model, test_loader, test_config, logger):
             break
         title_list = batch  # batch size是1，一个batch写一首诗
         title_tensor = to_tensor(title_list)
-
-        # test函数将当前batch对应的这首诗decode出来，记住每次decode的输入context是上一次的结果
-        # output_poem = 'Global iter: {}\n'.format(global_iter)
-        output_poem = model.test(title_tensor=title_tensor, title_words=title_list)
-        output_poems += output_poem
+        for i in range(3):
+            output_poems += "Gaussian No.{}\n".format(i)
+            output_poem = model.test(title_tensor=title_tensor, title_words=title_list)
+            output_poems += output_poem
+            output_poems += '\n'
+        output_poems += '\n'
     logger.info(output_poems)
 
     print("Done testing")
