@@ -240,8 +240,7 @@ class CVAE(nn.Module):
         condition_prior = torch.cat((title_last_hidden, context_last_hidden), dim=1)
 
         # z_prior, prior_mu, prior_logvar, pi, pi_final = self.sample_code_prior(condition_prior, sentiment_mask=sentiment_mask)
-        z_prior, prior_mu, prior_logvar = self.sample_code_prior(condition_prior,
-                                                                               sentiment_mask=sentiment_mask)
+        z_prior, prior_mu, prior_logvar = self.sample_code_prior(condition_prior,sentiment_mask=sentiment_mask)
         z_post, post_mu, post_logvar = self.sample_code_post(x, condition_prior)
         if sentiment_lead is not None:
             self.sent_lead_loss = self.criterion_sent_lead(input=pi, target=sentiment_lead)

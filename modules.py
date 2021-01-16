@@ -220,15 +220,15 @@ class MixVariation(nn.Module):
         self.init_w = init_weight
         self.gumbel_temp = 0.1
 
-        # 高斯分布选择子网
-        self.pi_net = nn.Sequential(
-            nn.Linear(z_size, n_components),
-            nn.Dropout(dropout_rate),
-            # nn.Linear(z_size, z_size),
-            # nn.BatchNorm1d(z_size, eps=1e-05, momentum=0.1),
-            # nn.LeakyReLU(0.1),
-            # nn.Linear(z_size, n_components)
-        )
+        # # 高斯分布选择子网
+        # self.pi_net = nn.Sequential(
+        #     nn.Linear(z_size, n_components),
+        #     nn.Dropout(dropout_rate),
+        #     # nn.Linear(z_size, z_size),
+        #     # nn.BatchNorm1d(z_size, eps=1e-05, momentum=0.1),
+        #     # nn.LeakyReLU(0.1),
+        #     # nn.Linear(z_size, n_components)
+        # )
 
         self.fc = nn.Sequential(
             nn.Linear(input_size, self.temp_size),
@@ -267,72 +267,74 @@ class MixVariation(nn.Module):
     # context (batch, input_size)
     # sentiment_mask (batch, 1)
     # ###################################
-    # sentiment_mask不为空-->说明是标注集
+    # sentiment_mask不为空-->将对应情感训练到对应的先验分布上
     # sentimen_mask为空，mask_type不为空-->说明是测试使用某一个高斯的生成结果
     # sentimen_mask为空，mask_type为空, sentiment_lead不为空-->说明是未标注集训练，使用sentiment_lead做一级引导
     def forward(self, context, sentiment_mask=None, mask_type=None):
         batch_size, _ = context.size()
         context = self.fc(context)
 
-        # 可以考虑先乘pi_net做筛选，再求z
-        mus = self.context_to_mus(context)
-        logsigmas = self.context_to_logsigmas(context)
-        stds = torch.exp(0.5 * logsigmas)  # (batch, 5 * z_size)
-        # epsilons (batch, 5 * z_size)
-        epsilons = to_tensor(torch.randn([batch_size, self.n_components * self.z_size]))
+        # 训练时候，先用情感把对应高斯分布的z选出来，相当于情感是对应z的一个主键，所有对应情感的诗
+        # 都拟合到这个先验分布上
 
-        zi = epsilons * stds + mus  # (batch, 5, z_size)
-        pi = None
-        pi_final = None
-        # import pdb
-        # pdb.set_trace()
         if sentiment_mask is None:
-
+            # 测试某一维高斯分布
             if mask_type is not None:
-                # import pdb
-                # pdb.set_trace()
-                # pi = torch.zeros(batch_size, 5)
-                pi = torch.zeros(batch_size, 3)
+                sentiment_mask = torch.zeros(batch_size, 3)
 
                 if mask_type == "0":
-                    pi[:, 0] = 1
+                    sentiment_mask[:, 0] = 1
                 elif mask_type == "1":
-                    pi[:, 1] = 1
+                    sentiment_mask[:, 1] = 1
                 elif mask_type == "2":
-                    pi[:, 2] = 1
+                    sentiment_mask[:, 2] = 1
                 else:
                     print("Mask type invalid")
-                pi_final = pi.cuda()
-
+                sentiment_mask = sentiment_mask.cuda()
             else:
+                sentiment_mask = torch.zeros(batch_size, 3)
+                one_id = torch.randint(0, 3, (1, batch_size)).squeeze().numpy()
+                for i in range(len(one_id)):
+                    sentiment_mask[i][one_id[i]] = 1
+                sentiment_mask = sentiment_mask.cuda()
 
-                pi = self.pi_net(context)  # (batch, 5)
+            # else:
+            #
+            #     pi = self.pi_net(context)  # (batch, 5)
+            #
+            #     pi_hard = F.gumbel_softmax(pi, tau=self.gumbel_temp, hard=True)
+            #     pi_soft = F.gumbel_softmax(pi, tau=self.gumbel_temp, hard=False)
+            #     pi_final = pi_hard - pi_soft.detach() + pi_soft
 
-                pi_hard = F.gumbel_softmax(pi, tau=self.gumbel_temp, hard=True)
-                pi_soft = F.gumbel_softmax(pi, tau=self.gumbel_temp, hard=False)
-                pi_final = pi_hard - pi_soft.detach() + pi_soft
+            # pi_final = pi_final.unsqueeze(1)  # (batch, 1, 5)
+            # z = torch.bmm(pi_final, zi.view(batch_size, self.n_components, self.z_size)).squeeze(1)  # (batch, 1, z_size) --> (batch, z_size)
+            # mu = torch.bmm(pi_final, mus.view(batch_size, self.n_components, self.z_size)).squeeze(1)  # (batch, z_size)
+            # logsigma = torch.bmm(pi_final, logsigmas.view(batch_size, self.n_components, self.z_size)).squeeze(1)  # (batch, z_size)
+        # else:
+        #     # 训练每一维高斯分布
+        #     # sentiment_mask = sentiment_mask.unsqueeze(1)
+        #     # z = torch.bmm(sentiment_mask.float(), zi.view(batch_size, self.n_components, self.z_size)).squeeze(1)
+        #     # mu = torch.bmm(sentiment_mask.float(), mus.view(batch_size, self.n_components, self.z_size))
+        #     # logsigma = torch.bmm(sentiment_mask.float(), logsigmas.view(batch_size, self.n_components, self.z_size))  # (batch, z_size)
+        #
+        #     z = zi
+        #     mu = masked_mus
+        #     logsigma = masked_logsigmas
 
-            pi_final = pi_final.unsqueeze(1)  # (batch, 1, 5)
-            z = torch.bmm(pi_final, zi.view(batch_size, self.n_components, self.z_size)).squeeze(1)  # (batch, 1, z_size) --> (batch, z_size)
-            mu = torch.bmm(pi_final, mus.view(batch_size, self.n_components, self.z_size)).squeeze(1)  # (batch, z_size)
-            logsigma = torch.bmm(pi_final, logsigmas.view(batch_size, self.n_components, self.z_size)).squeeze(1)  # (batch, z_size)
+        mus = self.context_to_mus(context).view(batch_size, self.n_components, self.z_size)
+        logsigmas = self.context_to_logsigmas(context).view(batch_size, self.n_components, self.z_size)
+        # import pdb
+        # pdb.set_trace()
+        # 先使用sentiment_mask选择出对应的高斯分布
+        masked_mus = torch.bmm(sentiment_mask.unsqueeze(1).float(), mus).squeeze()
+        masked_logsigmas = torch.bmm(sentiment_mask.unsqueeze(1).float(), logsigmas).squeeze()
 
-        else:
-            # mu = self.candidates_mu[force_choice](context)  # (batch, z_size)
-            # logsigma = self.candidates_sigma[force_choice](context)  # (batch, z_size)
-            # std = torch.exp(0.5 * logsigma)  # (batch, z_size)
-            # epsilon = to_tensor(torch.randn([batch_size, self.z_size]))
-            # z = epsilon * std + mu  # (batch, z_size)
+        # 再对选出的高斯分布进行采样
+        stds = torch.exp(0.5 * masked_logsigmas)  # (batch, 5 * z_size)
+        epsilons = to_tensor(torch.randn([batch_size, self.z_size]))
+        z = epsilons * stds + masked_mus  # (batch, 5, z_size)
 
-            sentiment_mask = sentiment_mask.unsqueeze(1)
-            # import pdb
-            # pdb.set_trace()
-            z = torch.bmm(sentiment_mask.float(), zi.view(batch_size, self.n_components, self.z_size)).squeeze(1)
-            mu = torch.bmm(sentiment_mask.float(), mus.view(batch_size, self.n_components, self.z_size))
-            logsigma = torch.bmm(sentiment_mask.float(), logsigmas.view(batch_size, self.n_components, self.z_size))  # (batch, z_size)
-
-        # return z, mu, logsigma, pi, pi_final.squeeze()
-        return z, mu, logsigma
+        return z, masked_mus, masked_logsigmas
 
     
 class Decoder(nn.Module):
