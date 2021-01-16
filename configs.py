@@ -7,7 +7,7 @@ class Config(object):
     bidirectional = True
 
     # Model Arguments
-    max_vocab_cnt = 8000
+    max_vocab_cnt = 6000
     emb_size = 300  # size of word embeddings
     n_hidden = 400  # number of hidden units per layer 每层的hidden size
     bow_size = 400
@@ -29,7 +29,7 @@ class Config(object):
 
     # Training Arguments
     batch_size = 80  # train batch size 80, valid 60, test 1
-    epochs = 20  # maximum number of epochs every global iter
+    epochs = 5  # maximum number of epochs every global iter
     min_epochs = 2  # minimum number of epochs to train for
 
     lr_ae = 1e-3  # autoencoder learning rate adam
@@ -39,6 +39,7 @@ class Config(object):
 
     log_every = 50
     valid_every = 200
+    test_every = 400
 
     # Gaussian Mixture Prior Network
     with_sentiment=True
@@ -46,4 +47,7 @@ class Config(object):
     n_prior_components = 3
     temp_size = 800
 
+    # Model reload
+    reload_model = False
+    model_name = 'model_global_t_13596_epoch3.pckl'
 

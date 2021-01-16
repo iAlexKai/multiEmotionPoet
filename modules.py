@@ -294,25 +294,12 @@ class MixVariation(nn.Module):
                 # pi = torch.zeros(batch_size, 5)
                 pi = torch.zeros(batch_size, 3)
 
-                # if mask_type == "negative":
-                #     pi[:, 0:2] = torch.zeros(batch_size, 2)
-                # # mask正向
-                # elif mask_type == "positive":
-                #     pi[:, 3:5] = torch.zeros(batch_size, 2)
-                # # 强行去掉中性情感
-                # # mask中性
-                # elif mask_type == "neutral":
-                #     pi[:, 2] = torch.zeros(batch_size)
                 if mask_type == "0":
                     pi[:, 0] = 1
                 elif mask_type == "1":
                     pi[:, 1] = 1
                 elif mask_type == "2":
                     pi[:, 2] = 1
-                # elif mask_type == "3":
-                #     pi[:, 3] = 1
-                # elif mask_type == "4":
-                #     pi[:, 4] = 1
                 else:
                     print("Mask type invalid")
                 pi_final = pi.cuda()

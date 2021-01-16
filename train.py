@@ -1,5 +1,5 @@
 import argparse
-import time
+from beeprint import pp
 from datetime import datetime
 import numpy as np
 import random
@@ -14,12 +14,14 @@ from data_apis.data_utils import SWDADataLoader
 from models.seq2seq import Seq2Seq
 from models.cvae import CVAE
 from models.cvae_gmp import CVAE_GMP
+from helper import test_sentiment
 
 from helper import to_tensor, timeSince  # 将numpy转为tensor
 
 from experiments.metrics import Metrics
 from sample import evaluate
 from tensorboardX import SummaryWriter # install tensorboardX (pip install tensorboardX) before importing this package
+
 
 
 parentPath = os.path.abspath("..")
@@ -37,8 +39,6 @@ parser.add_argument('--train_data_dir', type=str, default='./data/train_data_wit
 
 parser.add_argument('--test_data_dir', type=str, default='./data/test_data.txt',
                     help='addr of data for testing, i.e. test titles')
-
-parser.add_argument('--max_vocab_size', type=int, default=10000, help='The size of the vocab, Cannot be None')
 parser.add_argument('--expname', type=str, default='sentPoems',
                     help='experiment name, for disinguishing different parameter settings')
 parser.add_argument('--model', type=str, default='mCVAE', help='name of the model')
@@ -111,16 +111,9 @@ def save_model(model, epoch, log_start_time, global_t, sentiment=None):
 #     torch.save(f='./output/{}/{}/{}/{}/models/model_epo{}.pckl'.format(args.model, args.expname,
 #                                                     args.dataset, sentiment_id, epoch), obj=model)
 
-def load_model(global_iter, epoch):
-    print("Load model global iter{}, epoch{}".format(global_iter, epoch))
-    model = torch.load(f='./output/{}/{}/{}/models/model_iter{}_epoch{}.pckl'.
-                       format(args.model, args.expname, args.dataset, global_iter, epoch))
-    model = model.cuda()
-    return model
-
-
-def load_model(model_path):
-    model = torch.load(f='{}'.format(model_path))
+def load_model(model_name):
+    print("Load model {}".format(model_name))
+    model = torch.load(f='{}'.format(model_name))
     model = model.cuda()
     return model
 
@@ -185,7 +178,7 @@ def main():
     # config for training
     config = Config()
     print("Normal train config:")
-    # pp(config)
+    pp(config)
 
     valid_config = Config()
     valid_config.dropout = 0
@@ -198,30 +191,6 @@ def main():
 
     with_sentiment = config.with_sentiment
 
-    # LOG #
-    log_start_time = str(datetime.now().strftime('%Y%m%d%H%M'))
-    if not os.path.isdir('./output'):
-        os.makedirs('./output')
-    if not os.path.isdir('./output/{}'.format(args.expname)):
-        os.makedirs('./output/{}'.format(args.expname))
-    if not os.path.isdir('./output/{}/{}'.format(args.expname, log_start_time)):
-        os.makedirs('./output/{}/{}'.format(args.expname, log_start_time))
-
-    # save arguments
-    json.dump(vars(args), open('./output/{}/{}/args.json'
-                               .format(args.expname, log_start_time), 'w'))
-
-    logger = logging.getLogger(__name__)
-    logging.basicConfig(level=logging.DEBUG, format="%(message)s")
-    fh = logging.FileHandler("./output/{}/{}/logs.txt"
-                      .format(args.expname, log_start_time))
-    # add the handlers to the logger
-    logger.addHandler(fh)
-    logger.info(vars(args))
-
-    tb_writer = SummaryWriter(
-        "./output/{}/{}/tb_logs".format(args.expname, log_start_time)) if args.visual else None
-
     ###############################################################################
     # Load data
     ###############################################################################
@@ -230,7 +199,7 @@ def main():
     # 处理pretrain数据和完整诗歌数据
 
     # api = LoadPoem(args.train_data_dir, args.test_data_dir, args.max_vocab_size)
-    api = LoadPoem(corpus_path=args.train_data_dir, test_path=args.test_data_dir, max_vocab_cnt=args.max_vocab_size,
+    api = LoadPoem(corpus_path=args.train_data_dir, test_path=args.test_data_dir, max_vocab_cnt=config.max_vocab_cnt,
                    with_sentiment=with_sentiment)
 
     # 交替训练，准备大数据集
@@ -246,41 +215,44 @@ def main():
     print("Finish Poem data loading, not pretraining or alignment test")
 
     if not args.forward_only:
-        ###############################################################################
-        # Define the models and word2vec weight
-        ###############################################################################
-        # 处理用四库全书训练的word2vec
-        # if args.model != "Seq2Seq"
+        # LOG #
+        log_start_time = str(datetime.now().strftime('%Y%m%d%H%M'))
+        if not os.path.isdir('./output'):
+            os.makedirs('./output')
+        if not os.path.isdir('./output/{}'.format(args.expname)):
+            os.makedirs('./output/{}'.format(args.expname))
+        if not os.path.isdir('./output/{}/{}'.format(args.expname, log_start_time)):
+            os.makedirs('./output/{}/{}'.format(args.expname, log_start_time))
 
-        # logger.info("Start loading siku word2vec")
-        # pretrain_weight = None
-        # if os.path.exists(args.word2vec_path):
-        #     pretrain_vec = {}
-        #     word2vec = open(args.word2vec_path)
-        #     pretrain_data = word2vec.read().split('\n')[1:]
-        #     for data in pretrain_data:
-        #         data = data.split(' ')
-        #         pretrain_vec[data[0]] = [float(item) for item in data[1:-1]]
-        #     # nparray (vocab_len, emb_dim)
-        #     pretrain_weight = process_pretrain_vec(pretrain_vec, api.vocab)
-        #     logger.info("Successfully loaded siku word2vec")
+        # save arguments
+        json.dump(vars(args), open('./output/{}/{}/args.json'
+                                   .format(args.expname, log_start_time), 'w'))
 
-        # import pdb
-        # pdb.set_trace()
+        logger = logging.getLogger(__name__)
+        logging.basicConfig(level=logging.DEBUG, format="%(message)s")
+        fh = logging.FileHandler("./output/{}/{}/logs.txt"
+                                 .format(args.expname, log_start_time))
+        # add the handlers to the logger
+        logger.addHandler(fh)
+        logger.info(vars(args))
 
-        # 无论是否pretrain，都使用高斯混合模型
-        # pretrain时，用特定数据训练特定的高斯分布
-        # 不用pretrain时，用大数据训练高斯混合分布
+        tb_writer = SummaryWriter(
+            "./output/{}/{}/tb_logs".format(args.expname, log_start_time)) if args.visual else None
 
-        if args.model == "mCVAE":
-            model = CVAE_GMP(config=config, api=api)
-        elif args.model == 'CVAE':
-            model = CVAE(config=config, api=api)
+        if config.reload_model:
+            model = load_model(config.model_name)
         else:
-            model = Seq2Seq(config=config, api=api)
+            if args.model == "mCVAE":
+                model = CVAE_GMP(config=config, api=api)
+            elif args.model == 'CVAE':
+                model = CVAE(config=config, api=api)
+            else:
+                model = Seq2Seq(config=config, api=api)
+            if use_cuda:
+                model = model.cuda()
 
-        if use_cuda:
-            model = model.cuda()
+
+
         # if corpus.word2vec is not None and args.reload_from<0:
         #     print("Loaded word2vec")
         #     model.embedder.weight.data.copy_(torch.from_numpy(corpus.word2vec))
@@ -338,45 +310,62 @@ def main():
 
                 # valid
                 if global_t % config.valid_every == 0:
-                    test_process(model=model, test_loader=test_loader, test_config=test_config, logger=logger)
+                    # test_process(model=model, test_loader=test_loader, test_config=test_config, logger=logger)
                     valid_process(global_t=global_t, model=model, valid_loader=valid_loader, valid_config=valid_config,
                                   unlabeled_epoch=epoch_id,  # 如果sample_rate_unlabeled不是1，这里要在最后加一个1
                                   tb_writer=tb_writer, logger=logger,
                                   cur_best_score=cur_best_score)
                 # if batch_idx % (train_loader.num_batch // 3) == 0:
                 #     test_process(model=model, test_loader=test_loader, test_config=test_config, logger=logger)
-
+                if global_t % config.test_every == 0:
+                    test_process(model=model, test_loader=test_loader, test_config=test_config, logger=logger)
 
     # forward_only 测试
     else:
-        expname = 'gmp'
-        time = '202101131456'
+        expname = 'sentPoems'
+        time = '202101151847'
 
         model = load_model('./output/{}/{}/model_global_t_13596_epoch3.pckl'.format(expname, time))
-        model.vocab = api.vocab
-        model.rev_vocab = api.rev_vocab
         test_loader.epoch_init(test_config.batch_size, shuffle=False)
         if not os.path.exists('./output/{}/{}/test/'.format(expname, time)):
             os.mkdir('./output/{}/{}/test/'.format(expname, time))
         output_file = open('./output/{}/{}/test/output.txt'
                            .format(expname, time),
                            'w')
+
+        prior_list = [{0: 0, 1: 0, 2: 0}, {0: 0, 1: 0, 2: 0}, {0: 0, 1: 0, 2: 0}]
+
+        poem_count = 0
         while True:
-            model.eval()  # eval()主要影响BatchNorm, dropout等操作
+            model.eval()
             batch = test_loader.next_batch_test()  # test data使用专门的batch
-            batch_size = test_loader.batch_size
+            poem_count += 1
+            if poem_count % 10 == 0:
+                print("Predicted {} poems".format(poem_count))
             if batch is None:
                 break
             title_list = batch  # batch size是1，一个batch写一首诗
             title_tensor = to_tensor(title_list)
             # test函数将当前batch对应的这首诗decode出来，记住每次decode的输入context是上一次的结果
+
             for i in range(3):
-                # import pdb
-                # pdb.set_trace()
-                output_file.write("Gaussian No.{}\n".format(i))
-                output_poem = model.test(title_tensor, title_list, mask_type=str(i))
-                output_file.write(output_poem)
-                output_file.write('\n')
+
+                output_file.write("\nGaussian No.{}\n".format(i))
+                output_poem, output_tokens = model.test(title_tensor, title_list, mask_type=str(i))
+                output_file.write(output_poem.strip().split('\n')[0] + '\n')  # 写标题
+
+                neg, neu, pos = test_sentiment(np.array(output_tokens)[:, :7], output_file)
+
+                prior_list[i][0] += neg
+                prior_list[i][1] += neu
+                prior_list[i][2] += pos
+
+        for i in range(3):
+            print("Use prior {}".format(i))
+            total = prior_list[i][0] + prior_list[i][1] + prior_list[i][2]
+            print("neg: %.2f%%, neu: %.2f%%, pos: %.2f%%" %
+                  (prior_list[i][0] * 100 / total, prior_list[i][1] * 100 / total, prior_list[i][2] * 100 / total))
+
         print("Done testing")
 
 
@@ -444,26 +433,35 @@ def evaluate_process(model, valid_loader, log_start_time, global_t, epoch, logge
 def test_process(model, test_loader, test_config, logger):
     # 训练完一个epoch，用测试集的标题生成一次诗
 
-    # mask_types = ['negative', 'positive', 'neutral']
-    model.eval()
-    output_poems = ""
-
     test_loader.epoch_init(test_config.batch_size, shuffle=False)
-    while True:
-        model.eval()  # eval()主要影响BatchNorm, dropout等操作
-        batch = test_loader.next_batch_test()  # test data使用专门的batch
+    prior_list = [{0: 0, 1: 0, 2: 0}, {0: 0, 1: 0, 2: 0}, {0: 0, 1: 0, 2: 0}]
 
+    poem_count = 0
+    while True:
+        model.eval()
+        batch = test_loader.next_batch_test()  # test data使用专门的batch
+        poem_count += 1
+        if poem_count % 10 == 0:
+            print("Predicted {} poems".format(poem_count))
         if batch is None:
             break
         title_list = batch  # batch size是1，一个batch写一首诗
         title_tensor = to_tensor(title_list)
+        # test函数将当前batch对应的这首诗decode出来，记住每次decode的输入context是上一次的结果
+
         for i in range(3):
-            output_poems += "Gaussian No.{}\n".format(i)
-            output_poem = model.test(title_tensor=title_tensor, title_words=title_list)
-            output_poems += output_poem
-            output_poems += '\n'
-        output_poems += '\n'
-    logger.info(output_poems)
+            output_poem, output_tokens = model.test(title_tensor, title_list, mask_type=str(i))
+            neg, neu, pos = test_sentiment(np.array(output_tokens)[:, :7])
+
+            prior_list[i][0] += neg
+            prior_list[i][1] += neu
+            prior_list[i][2] += pos
+
+    for i in range(3):
+        logger.info("Use prior {}".format(i))
+        total = prior_list[i][0] + prior_list[i][1] + prior_list[i][2]
+        logger.info("neg: %.2f%%, neu: %.2f%%, pos: %.2f%%" %
+              (prior_list[i][0] * 100 / total, prior_list[i][1] * 100 / total, prior_list[i][2] * 100 / total))
 
     print("Done testing")
 

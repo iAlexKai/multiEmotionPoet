@@ -96,10 +96,17 @@ class LoadPoem(object):
         top_vocab = Counter(all_words).most_common()
         # raw_vocab_size = len(vocab_count)
         # discard_wc = np.sum([c for t, c, in vocab_count[max_vocab_cnt:]])
-        top_vocab = top_vocab[0: max_vocab_cnt]
-
+        top_vocab = top_vocab[0: max_vocab_cnt-2]
         self.vocab = ["<pad>", "<unk>"] + [t for t, cnt in top_vocab]
         self.rev_vocab = {t: idx for idx, t in enumerate(self.vocab)}
+
+        # with open('vocab.txt', 'w') as out:
+        #     for i in range(len(self.vocab)):
+        #         out.write(self.vocab[i])
+        #         if i != len(self.vocab) - 1:
+        #             out.write('\n')
+        # import pdb
+        # pdb.set_trace()
         self.unk_id = self.rev_vocab["<unk>"]
 
     def get_tokenized_test_corpus(self):

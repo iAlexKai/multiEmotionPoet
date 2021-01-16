@@ -29,6 +29,8 @@ class CVAE_GMP(CVAE):
         title_tokens = [self.vocab[e] for e in title_words[0].tolist() if e not in [0, self.eos_id, self.go_id]]
         pred_poems.append(title_tokens)
 
+        gen_words = "\n"
+        gen_tokens = []
         for i in range(4):
             tem = to_tensor(np.array(tem))
             context = tem
@@ -43,21 +45,22 @@ class CVAE_GMP(CVAE):
             z_prior, prior_mu, prior_logvar = self.sample_code_prior(condition_prior, mask_type=mask_type)
             final_info = torch.cat((z_prior, condition_prior), 1)
 
-            decode_words = self.decoder.testing(init_hidden=self.init_decoder_hidden(final_info),
+            pred_tokens = self.decoder.testing(init_hidden=self.init_decoder_hidden(final_info),
                                                 maxlen=self.maxlen, go_id=self.go_id, mode="greedy")
-            decode_words = decode_words[0].tolist()
+            pred_tokens = pred_tokens[0].tolist()
 
-            if len(decode_words) >= self.maxlen:
-                tem = [decode_words[0: self.maxlen]]
+            if len(pred_tokens) >= self.maxlen:
+                tem = [pred_tokens[0: self.maxlen]]
             else:
-                tem = [[0] * (self.maxlen - len(decode_words)) + decode_words]
-            pred_tokens = [self.vocab[e] for e in decode_words[:-1] if
-                           e != self.eos_id and e != 0 and e != self.go_id]
-            pred_poems.append(pred_tokens)
+                tem = [[0] * (self.maxlen - len(pred_tokens)) + pred_tokens]
 
-        gen = "\n"
+            pred_words = [self.vocab[e] for e in pred_tokens[:-1] if
+                           e != self.eos_id and e != 0 and e != self.go_id]
+            pred_poems.append(pred_words)
+            gen_tokens.append(pred_tokens)
+
         for line in pred_poems:
             cur_line = " ".join(line)
-            gen = gen + cur_line + '\n'
+            gen_words = gen_words + cur_line + '\n'
 
-        return gen
+        return gen_words, gen_tokens
