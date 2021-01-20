@@ -1,3 +1,5 @@
+#!/usr/bin/env python
+# coding: utf-8
 """
 Copyright 2018 NAVER Corp.
 All rights reserved.
@@ -36,6 +38,7 @@ import tqdm
 import torch
 import tensorflow as tf
 import numpy as np
+
 
 warnings.filterwarnings("ignore")
 config = tf.compat.v1.ConfigProto()
@@ -260,24 +263,29 @@ with tf.name_scope("dnn"):
         accuracy = tf.reduce_sum(tf.reduce_sum(tf.cast(correct_preds, tf.float32), axis=0))
 
 
-sess = tf.compat.v1.Session()
-init = tf.compat.v1.global_variables_initializer()
-sess.run(init)
-saver = tf.compat.v1.train.import_meta_graph('sent_predictor/dnn_checkpoints/dnn.meta')
-saver.restore(sess, "sent_predictor/dnn_checkpoints/dnn")
-
-
-def test_sentiment(predic_tokens, output_file=None):
+def test_sentiment(predic_tokens):
+    saver = tf.compat.v1.train.Saver()
     sentiments_count = {0: 0, 1: 0, 2: 0}
 
-    for sentence in predic_tokens:
-        input_tokens = np.array(sentence, dtype=np.int64).reshape(1, -1)
-        pred_val = sess.run(predict_value, feed_dict={inputs: input_tokens})
-        sentiments_count[pred_val[0]] += 1
-        words = "".join([token_to_word[i] for i in sentence])
-        # print("out is {} {}".format(words, pred_val[0]))
-        if output_file:
-            output_file.write('{} {}\n'.format(words, pred_val[0]))
-        # print("Predic {} emotion is {}".format(words, sentiments[pred_val[0]]))
-        # print("The sentimen of {} is {}".format(line, sentiments[pred_val[0]]))
-    return sentiments_count[0], sentiments_count[1], sentiments_count[2]
+    with tf.compat.v1.Session() as sess:
+        sentiment_result = []
+        saver.restore(sess, "sent_predictor/dnn_checkpoints_small_dataset/dnn")
+        # saver.restore(sess, "{}_checkpoints/dnn".format(model_name))
+        for sentence in predic_tokens:
+            input_tokens = np.array(sentence, dtype=np.int64).reshape(1, -1)
+            pred_val = sess.run(predict_value, feed_dict={inputs: input_tokens})
+            sentiment_result.append(pred_val[0])
+            sentiments_count[pred_val[0]] += 1
+        return sentiment_result, sentiments_count[0], sentiments_count[1], sentiments_count[2]
+
+
+def write_predict_result_to_file(titles, predict_results, sentiment_result, output_file):
+    assert len(predict_results) == len(sentiment_result) == 4 * len(titles)
+    ptr = 0
+    for i in range(len(titles)):
+        output_file.write('{}\n'.format(titles[i]))
+        for _ in range(4):
+            output_file.write('{} {}\n'.format("".join([token_to_word[token] for token in predict_results[ptr]]),
+                                               sentiment_result[ptr]))
+            ptr += 1
+        output_file.write('\n')

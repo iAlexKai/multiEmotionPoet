@@ -169,13 +169,17 @@ class Encoder(nn.Module):
 
 
 class Variation(nn.Module):
-    def __init__(self, input_size, z_size, dropout_rate, init_weight):
+    def __init__(self, sent_class_size, sent_emb_size, input_size, z_size, dropout_rate, init_weight):
         super(Variation, self).__init__()
         self.input_size = input_size
         self.z_size=z_size
         self.init_w = init_weight
+        self.sent_class_size = sent_class_size
+        self.sent_emb_size = sent_emb_size
+
+        self.sent_embedder = nn.Embedding(self.sent_class_size, self.sent_emb_size)
         self.fc = nn.Sequential(
-            nn.Linear(input_size, 1200),
+            nn.Linear(input_size+self.sent_emb_size, 1200),
             nn.BatchNorm1d(1200, eps=1e-05, momentum=0.1),
             nn.LeakyReLU(0.1),
             nn.Dropout(dropout_rate),
@@ -198,40 +202,38 @@ class Variation(nn.Module):
             # nn.init.kaiming_uniform_(m.weight.data)
             m.bias.data.fill_(0)
 
-    def forward(self, context):
+    def forward(self, context, sent_label):
+        # import pdb
+        # pdb.set_trace()
+        sentiment = self.sent_embedder(sent_label)
+
         batch_size, _ = context.size()  # prior: (batch, 4 * hidden)
-        context = self.fc(context)
+        cond = torch.cat([context, sentiment], dim=1)
+        context = self.fc(cond)
         mu = self.context_to_mu(context)
         logsigma = self.context_to_logsigma(context) 
         std = torch.exp(0.5 * logsigma)
         
         epsilon = to_tensor(torch.randn([batch_size, self.z_size]))
         z = epsilon * std + mu  
-        return z, mu, logsigma 
+        return z, mu, logsigma
     
 
 class MixVariation(nn.Module):
-    def __init__(self, input_size, temp_size, z_size, n_components, dropout_rate, init_weight):
+    def __init__(self, sent_class_size, sent_emb_size, input_size, temp_size, z_size, n_components, dropout_rate, init_weight):
         super(MixVariation, self).__init__()
         self.input_size = input_size
         self.z_size=z_size
         self.temp_size = temp_size
         self.n_components = n_components
         self.init_w = init_weight
-        self.gumbel_temp = 0.1
+        self.sent_class_size = sent_class_size
+        self.sent_emb_size = sent_emb_size
 
-        # # 高斯分布选择子网
-        # self.pi_net = nn.Sequential(
-        #     nn.Linear(z_size, n_components),
-        #     nn.Dropout(dropout_rate),
-        #     # nn.Linear(z_size, z_size),
-        #     # nn.BatchNorm1d(z_size, eps=1e-05, momentum=0.1),
-        #     # nn.LeakyReLU(0.1),
-        #     # nn.Linear(z_size, n_components)
-        # )
+        self.sent_embedder = nn.Embedding(self.sent_class_size, self.sent_emb_size)
 
         self.fc = nn.Sequential(
-            nn.Linear(input_size, self.temp_size),
+            nn.Linear(input_size+self.sent_emb_size, self.temp_size),
             nn.BatchNorm1d(self.temp_size, eps=1e-05, momentum=0.1),
             nn.LeakyReLU(0.1),
             nn.Dropout(dropout_rate),
@@ -241,19 +243,28 @@ class MixVariation(nn.Module):
             nn.Dropout(dropout_rate),
         )
 
-        self.context_to_mus = nn.Linear(z_size, n_components*z_size)
+        self.context_to_mus = nn.Sequential(
+            nn.Linear(z_size, n_components*z_size),
+            nn.BatchNorm1d(n_components*z_size, eps=1e-05, momentum=0.1),
+            nn.Dropout(dropout_rate),
+            nn.Linear(n_components*z_size, z_size),
+            nn.BatchNorm1d(z_size, eps=1e-05, momentum=0.1),
+            nn.Dropout(dropout_rate),
+        )
 
-        self.context_to_logsigmas = nn.Linear(z_size, n_components*z_size)
+        self.context_to_logsigmas = nn.Sequential(
+            nn.Linear(z_size, n_components*z_size),
+            nn.BatchNorm1d(n_components*z_size, eps=1e-05, momentum=0.1),
+            nn.Dropout(dropout_rate),
+            nn.Linear(n_components*z_size, z_size),
+            nn.BatchNorm1d(z_size, eps=1e-05, momentum=0.1),
+            nn.Dropout(dropout_rate),
+        )
 
-        self.pi_net.apply(self.init_pi_net)
         self.fc.apply(self.init_weights)
         self.init_weights(self.context_to_mus)
         self.init_weights(self.context_to_logsigmas)
 
-        # self.candidates_mu = [self.context_to_mu_1, self.context_to_mu_2, self.context_to_mu_3]
-        #                  self.context_to_mu_4, self.context_to_mu_5]
-        # self.candidates_sigma = [self.context_to_logsigma_1, self.context_to_logsigma_2, self.context_to_logsigma_3]
-        #                     self.context_to_logsigma_4, self.context_to_logsigma_5]
     def init_weights(self, m):
         if isinstance(m, nn.Linear):        
             m.weight.data.uniform_(-self.init_w, self.init_w)
@@ -270,71 +281,29 @@ class MixVariation(nn.Module):
     # sentiment_mask不为空-->将对应情感训练到对应的先验分布上
     # sentimen_mask为空，mask_type不为空-->说明是测试使用某一个高斯的生成结果
     # sentimen_mask为空，mask_type为空, sentiment_lead不为空-->说明是未标注集训练，使用sentiment_lead做一级引导
-    def forward(self, context, sentiment_mask=None, mask_type=None):
-        batch_size, _ = context.size()
-        context = self.fc(context)
-
-        # 训练时候，先用情感把对应高斯分布的z选出来，相当于情感是对应z的一个主键，所有对应情感的诗
-        # 都拟合到这个先验分布上
-
-        if sentiment_mask is None:
-            # 测试某一维高斯分布
-            if mask_type is not None:
-                sentiment_mask = torch.zeros(batch_size, 3)
-
-                if mask_type == "0":
-                    sentiment_mask[:, 0] = 1
-                elif mask_type == "1":
-                    sentiment_mask[:, 1] = 1
-                elif mask_type == "2":
-                    sentiment_mask[:, 2] = 1
-                else:
-                    print("Mask type invalid")
-                sentiment_mask = sentiment_mask.cuda()
-            else:
-                sentiment_mask = torch.zeros(batch_size, 3)
-                one_id = torch.randint(0, 3, (1, batch_size)).squeeze().numpy()
-                for i in range(len(one_id)):
-                    sentiment_mask[i][one_id[i]] = 1
-                sentiment_mask = sentiment_mask.cuda()
-
-            # else:
-            #
-            #     pi = self.pi_net(context)  # (batch, 5)
-            #
-            #     pi_hard = F.gumbel_softmax(pi, tau=self.gumbel_temp, hard=True)
-            #     pi_soft = F.gumbel_softmax(pi, tau=self.gumbel_temp, hard=False)
-            #     pi_final = pi_hard - pi_soft.detach() + pi_soft
-
-            # pi_final = pi_final.unsqueeze(1)  # (batch, 1, 5)
-            # z = torch.bmm(pi_final, zi.view(batch_size, self.n_components, self.z_size)).squeeze(1)  # (batch, 1, z_size) --> (batch, z_size)
-            # mu = torch.bmm(pi_final, mus.view(batch_size, self.n_components, self.z_size)).squeeze(1)  # (batch, z_size)
-            # logsigma = torch.bmm(pi_final, logsigmas.view(batch_size, self.n_components, self.z_size)).squeeze(1)  # (batch, z_size)
-        # else:
-        #     # 训练每一维高斯分布
-        #     # sentiment_mask = sentiment_mask.unsqueeze(1)
-        #     # z = torch.bmm(sentiment_mask.float(), zi.view(batch_size, self.n_components, self.z_size)).squeeze(1)
-        #     # mu = torch.bmm(sentiment_mask.float(), mus.view(batch_size, self.n_components, self.z_size))
-        #     # logsigma = torch.bmm(sentiment_mask.float(), logsigmas.view(batch_size, self.n_components, self.z_size))  # (batch, z_size)
-        #
-        #     z = zi
-        #     mu = masked_mus
-        #     logsigma = masked_logsigmas
-
-        mus = self.context_to_mus(context).view(batch_size, self.n_components, self.z_size)
-        logsigmas = self.context_to_logsigmas(context).view(batch_size, self.n_components, self.z_size)
+    def forward(self, context, sent_label):
         # import pdb
         # pdb.set_trace()
-        # 先使用sentiment_mask选择出对应的高斯分布
-        masked_mus = torch.bmm(sentiment_mask.unsqueeze(1).float(), mus).squeeze()
-        masked_logsigmas = torch.bmm(sentiment_mask.unsqueeze(1).float(), logsigmas).squeeze()
+        sentiment = self.sent_embedder(sent_label)
+
+        batch_size, _ = context.size()  # prior: (batch, 4 * hidden)
+        cond = torch.cat([context, sentiment], dim=1)
+        context = self.fc(cond)
+
+        # 接下来。不必再指定某一个高斯分布了，直接当做一个多维的高斯分布来做
+        # 情感的指定由最初的输入来做
+        # 需要想办法把情感当做condition的一部分，做embedding，才能最大限度地做到可控
+        # 而并不是分成若干个不同的先验分布
+
+        mus = self.context_to_mus(context)
+        logsigmas = self.context_to_logsigmas(context)
 
         # 再对选出的高斯分布进行采样
-        stds = torch.exp(0.5 * masked_logsigmas)  # (batch, 5 * z_size)
+        stds = torch.exp(0.5 * logsigmas)  # (batch, 5 * z_size)
         epsilons = to_tensor(torch.randn([batch_size, self.z_size]))
-        z = epsilons * stds + masked_mus  # (batch, 5, z_size)
+        z = epsilons * stds + mus  # (batch, 5, z_size)
 
-        return z, masked_mus, masked_logsigmas
+        return z, mus, logsigmas
 
     
 class Decoder(nn.Module):
@@ -363,6 +332,7 @@ class Decoder(nn.Module):
 
     # init_hidden: (batch, z_size + 4*hidden) --unsqueeze->  (1, batch, z_size+4*hidden)
     # self.decoder(torch.cat((z, c), 1), None, target[:, :-1], target_lens-1)
+    # 情感信息embedding后会当做输入信息输入到decoder的init状态中去
     def forward(self, init_hidden, context=None, inputs=None, lens=None):
         batch_size, maxlen = inputs.size()
         inputs = self.embedding(inputs)

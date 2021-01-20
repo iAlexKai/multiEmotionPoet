@@ -15,6 +15,8 @@ class CVAE(nn.Module):
         self.vocab = api.vocab
         self.vocab_size = len(self.vocab)
         self.embed_size = config.emb_size
+        self.sent_class_size = config.sent_class
+        self.sent_emb_size = config.sent_emb_size
         self.hidden_size = config.n_hidden
         self.bow_size = config.bow_size
         self.rev_vocab = api.rev_vocab
@@ -37,16 +39,17 @@ class CVAE(nn.Module):
         self.prior_input_dim = self.encoder_output_size * 2
         # 在prior的基础上再拼接对target的encode结果
         self.post_input_dim = self.prior_input_dim + self.encoder_output_size
-        self.decoder_input_size = self.prior_input_dim + self.z_size
+        self.decoder_input_size = self.prior_input_dim + self.z_size + self.sent_emb_size
 
         self.embedder = nn.Embedding(self.vocab_size, self.embed_size, padding_idx=PAD_token)
+        self.sent_embedder = nn.Embedding(self.sent_class_size, self.sent_emb_size)
         # 对title, 每一句诗做编码, 默认双向LSTM，将最终的一维拼在一起
         self.seq_encoder = Encoder(embedder=self.embedder, input_size=config.emb_size, hidden_size=config.n_hidden,
                                    bidirectional=self.bidirectional, n_layers=config.n_layers, noise_radius=config.noise_radius)
         # 先验网络
-        self.prior_net = Variation(self.prior_input_dim, self.z_size, dropout_rate=self.dropout, init_weight=self.init_w)
+        self.prior_net = Variation(self.sent_class_size, self.sent_emb_size, self.prior_input_dim, self.z_size, dropout_rate=self.dropout, init_weight=self.init_w)
         # 后验网络
-        self.post_net = Variation(self.post_input_dim, self.z_size, dropout_rate=self.dropout, init_weight=self.init_w)
+        self.post_net = Variation(self.sent_class_size, self.sent_emb_size, self.post_input_dim, self.z_size, dropout_rate=self.dropout, init_weight=self.init_w)
         # 词包loss的MLP
         self.bow_project = nn.Sequential(
             nn.Linear(self.decoder_input_size, self.bow_size),
@@ -92,7 +95,7 @@ class CVAE(nn.Module):
 
         # self.optimizer_lead = optim.Adam(list(self.seq_encoder.parameters())\
         #                                + list(self.prior_net.parameters()), lr=self.lr_lead)
-        self.optimizer_AE = optim.Adam(self.parameters(), lr=self.lr_ae)
+        self.optimizer_AE = optim.AdamW(self.parameters(), lr=self.lr_ae)
 
         # self.lr_scheduler_AE = optim.lr_scheduler.StepLR(self.optimizer_AE, step_size=10, gamma=0.6)
 
@@ -111,7 +114,7 @@ class CVAE(nn.Module):
             m.weight.data.uniform_(-self.init_w, self.init_w)
             m.bias.data.fill_(0)
 
-    def sample_code_post(self, x, c):
+    def sample_code_post(self, x, c, sentiment_label):
         # import pdb
         # pdb.set_trace()
         # mulogsigma = self.post_net(torch.cat((x, c), dim=1))
@@ -120,12 +123,12 @@ class CVAE(nn.Module):
         # std = torch.exp(0.5 * logsigma)
         # epsilon = to_tensor(torch.randn([batch_size, self.z_size]))
         # z = epsilon * std + mu
-        z, mu, logsigma = self.post_net(torch.cat((x, c), 1))  # 输入：(batch, 3*2*n_hidden)
+        z, mu, logsigma = self.post_net(torch.cat((x, c), 1), sentiment_label)  # 输入：(batch, 3*2*n_hidden)
         # z = self.post_generator(z)
         return z, mu, logsigma
 
-    def sample_code_prior(self, c, sentiment_mask=None):
-        return self.prior_net(c)
+    def sample_code_prior(self, c, sentiment_label):
+        return self.prior_net(c, sentiment_label)
 
     # # input: (batch, 3)
     # # target: (batch, 3)
@@ -137,7 +140,7 @@ class CVAE(nn.Module):
     #     return avg_cross_entropy
 
     # sentiment_lead: (batch, 3)
-    def train_AE(self, global_t, title, context, target, target_lens, sentiment_mask=None, sentiment_lead=None):
+    def train_AE(self, global_t, title, context, target, target_lens, sentiment_label):
         self.seq_encoder.train()
         self.decoder.train()
         self.optimizer_AE.zero_grad()
@@ -146,29 +149,14 @@ class CVAE(nn.Module):
 
         title_last_hidden, _ = self.seq_encoder(title)
         context_last_hidden, _ = self.seq_encoder(context)
+        sentiment = self.sent_embedder(sentiment_label)
 
-        # import pdb
-        # pdb.set_trace()
         x, _ = self.seq_encoder(target[:, 1:], target_lens-1)
         condition_prior = torch.cat((title_last_hidden, context_last_hidden), dim=1)
-
         # z_prior, prior_mu, prior_logvar, pi, pi_final = self.sample_code_prior(condition_prior, sentiment_mask=sentiment_mask)
-        z_prior, prior_mu, prior_logvar = self.sample_code_prior(condition_prior, sentiment_mask=sentiment_mask)
-        z_post, post_mu, post_logvar = self.sample_code_post(x, condition_prior)
-        # import pdb
-        # pdb.set_trace()
-        # if sentiment_lead is not None:
-        #     self.sent_lead_loss = self.criterion_sent_lead(input=pi, target=sentiment_lead)
-        # else:
-        self.sent_lead_loss = 0
-
-        # if sentiment_lead is not None:
-        #     self.optimizer_lead.zero_grad()
-        #     self.sent_lead_loss.backward()
-        #     self.optimizer_lead.step()
-        #     return [('lead_loss', self.sent_lead_loss.item())], global_t
-
-        final_info = torch.cat((z_post, condition_prior), dim=1)
+        z_prior, prior_mu, prior_logvar = self.sample_code_prior(condition_prior, sentiment_label)
+        z_post, post_mu, post_logvar = self.sample_code_post(x, condition_prior, sentiment_label)
+        final_info = torch.cat((z_post, condition_prior, sentiment), dim=1)
         # reconstruct_loss
         # import pdb
         # pdb.set_trace()
@@ -183,6 +171,7 @@ class CVAE(nn.Module):
         output_mask = mask.unsqueeze(1).expand(mask.size(0), self.vocab_size)  # [(batch_sz * seq_len) x n_tokens]
         masked_output = flattened_output.masked_select(output_mask).view(-1, self.vocab_size)
         self.rc_loss = self.criterion_ce(masked_output / self.temp, masked_target)
+
 
         # kl散度
         kld = gaussian_kld(post_mu, post_logvar, prior_mu, prior_logvar)
@@ -202,14 +191,13 @@ class CVAE(nn.Module):
         sum_bow_loss = torch.sum(bow_loss, 1)
         self.avg_bow_loss = torch.mean(sum_bow_loss)
         self.aug_elbo_loss = self.avg_bow_loss + self.kl_loss + self.rc_loss
-        self.total_loss = self.aug_elbo_loss + self.sent_lead_loss
+        self.total_loss = self.aug_elbo_loss
 
         # 变相增加标注集的学习率
         # if sentiment_mask is not None:
         #     self.total_loss = self.total_loss * 13.33
 
         avg_total_loss = self.total_loss.item()
-        avg_lead_loss = 0 if sentiment_lead is None else self.sent_lead_loss.item()
         avg_aug_elbo_loss = self.aug_elbo_loss.item()
         avg_kl_loss = self.kl_loss.item()
         avg_rc_loss = self.rc_loss.data.item()
@@ -220,19 +208,19 @@ class CVAE(nn.Module):
         self.optimizer_AE.step()
 
         return [('avg_total_loss', avg_total_loss),
-                ('avg_lead_loss', avg_lead_loss),
                 ('avg_aug_elbo_loss', avg_aug_elbo_loss),
                 ('avg_kl_loss', avg_kl_loss),
                 ('avg_rc_loss', avg_rc_loss),
                 ('avg_bow_loss', avg_bow_loss),
                 ('kl_weight', self.kl_weights)], global_t
 
-    def valid_AE(self, global_t, title, context, target, target_lens, sentiment_mask=None, sentiment_lead=None):
+    def valid_AE(self, global_t, title, context, target, target_lens, sentiment_label):
         self.seq_encoder.eval()
         self.decoder.eval()
 
         title_last_hidden, _ = self.seq_encoder(title)
         context_last_hidden, _ = self.seq_encoder(context)
+        sentiment = self.sent_embedder(sentiment_label)
 
         # import pdb
         # pdb.set_trace()
@@ -240,17 +228,9 @@ class CVAE(nn.Module):
         condition_prior = torch.cat((title_last_hidden, context_last_hidden), dim=1)
 
         # z_prior, prior_mu, prior_logvar, pi, pi_final = self.sample_code_prior(condition_prior, sentiment_mask=sentiment_mask)
-        z_prior, prior_mu, prior_logvar = self.sample_code_prior(condition_prior,sentiment_mask=sentiment_mask)
-        z_post, post_mu, post_logvar = self.sample_code_post(x, condition_prior)
-        if sentiment_lead is not None:
-            self.sent_lead_loss = self.criterion_sent_lead(input=pi, target=sentiment_lead)
-        else:
-            self.sent_lead_loss = 0
-
-        # if sentiment_lead is not None:
-        #     return [('valid_lead_loss', self.sent_lead_loss.item())], global_t
-
-        final_info = torch.cat((z_post, condition_prior), dim=1)
+        z_prior, prior_mu, prior_logvar = self.sample_code_prior(condition_prior, sentiment_label)
+        z_post, post_mu, post_logvar = self.sample_code_post(x, condition_prior, sentiment_label)
+        final_info = torch.cat((z_post, condition_prior, sentiment), dim=1)
 
         output = self.decoder(init_hidden=self.init_decoder_hidden(final_info), context=None, inputs=target[:, :-1])
         flattened_output = output.view(-1, self.vocab_size)
@@ -284,17 +264,15 @@ class CVAE(nn.Module):
         avg_kl_loss = self.kl_loss.item()
         avg_rc_loss = self.rc_loss.data.item()
         avg_bow_loss = self.avg_bow_loss.item()
-        avg_lead_loss = 0 if sentiment_lead is None else self.sent_lead_loss.item()
 
-        return [('valid_lead_loss', avg_lead_loss),
-                ('valid_aug_elbo_loss', avg_aug_elbo_loss),
+        return [('valid_aug_elbo_loss', avg_aug_elbo_loss),
                 ('valid_kl_loss', avg_kl_loss),
                 ('valid_rc_loss', avg_rc_loss),
                 ('valid_bow_loss', avg_bow_loss)]
 
     # batch_size = 1 只输入了一个标题
     # test的时候，只有先验，没有后验，更没有所谓的kl散度
-    def test(self, title_tensor, title_words):
+    def test(self, title_tensor, title_words, sentiment_label):
         self.seq_encoder.eval()
         self.decoder.eval()
         assert title_tensor.size(0) == 1
@@ -313,14 +291,17 @@ class CVAE(nn.Module):
                 context_last_hidden, _ = self.seq_encoder(title_tensor)
             else:
                 context_last_hidden, _ = self.seq_encoder(context)
+
             title_last_hidden, _ = self.seq_encoder(title_tensor)
+            sentiment = self.sent_embedder(sentiment_label)
 
             condition_prior = torch.cat((title_last_hidden, context_last_hidden), dim=1)
             # z_prior, prior_mu, prior_logvar, _, _ = self.sample_code_prior(condition_prior, mask_type=mask_type)
-            z_prior, prior_mu, prior_logvar = self.sample_code_prior(condition_prior)
-            final_info = torch.cat((z_prior, condition_prior), 1)
+            z_prior, prior_mu, prior_logvar = self.sample_code_prior(condition_prior, sentiment_label)
+            final_info = torch.cat((z_prior, condition_prior, sentiment), 1)
 
-            pred_tokens = self.decoder.testing(init_hidden=self.init_decoder_hidden(final_info), maxlen=self.maxlen, go_id=self.go_id, mode="greedy")
+            pred_tokens = self.decoder.testing(init_hidden=self.init_decoder_hidden(final_info),
+                                               maxlen=self.maxlen, go_id=self.go_id, mode="greedy")
             pred_tokens = pred_tokens[0].tolist()
 
             if len(pred_tokens) >= self.maxlen:
@@ -328,7 +309,8 @@ class CVAE(nn.Module):
             else:
                 tem = [[0] * (self.maxlen - len(pred_tokens)) + pred_tokens]
 
-            pred_words = [self.vocab[e] for e in pred_tokens[:-1] if e != self.eos_id and e != 0 and e != self.go_id]
+            pred_words = [self.vocab[e] for e in pred_tokens[:-1] if
+                          e != self.eos_id and e != 0 and e != self.go_id]
             pred_poems.append(pred_words)
             gen_tokens.append(pred_tokens)
 

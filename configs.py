@@ -8,13 +8,15 @@ class Config(object):
 
     # Model Arguments
     max_vocab_cnt = 6000
-    emb_size = 300  # size of word embeddings
-    n_hidden = 400  # number of hidden units per layer 每层的hidden size
-    bow_size = 400
+    emb_size = 256  # size of word embeddings
+    sent_class = 3  # size of sentiment, one_hot vector, three sentiments
+    sent_emb_size = 64
+    n_hidden = 512  # number of hidden units per layer 每层的hidden size
+    bow_size = 512
     n_layers = 1  # number of layers
     noise_radius = 0.2  # stdev of noise for autoencoder (regularizer)
 
-    z_size = 400  # dimension of z # 300 performs worse
+    z_size = 256  # dimension of z # 300 performs worse
     full_kl_step = 10000
 
     init_weight = 0.02   # uniform random from [-init_w, init_w]
@@ -25,21 +27,21 @@ class Config(object):
     # n_iters_d = 5
     temp = 1.0  # softmax temperature (lower --> more discrete)
 
-    dropout = 0.3  # dropout applied to layers (0 = no dropout)
+    dropout = 0.4  # dropout applied to layers (0 = no dropout)
 
     # Training Arguments
     batch_size = 80  # train batch size 80, valid 60, test 1
-    epochs = 5  # maximum number of epochs every global iter
+    epochs = 10  # maximum number of epochs every global iter
     min_epochs = 2  # minimum number of epochs to train for
 
-    lr_ae = 1e-3  # autoencoder learning rate adam
+    lr_ae = 0.001  # autoencoder learning rate adam
     # lr_ae = 0.0003  # autoencoder learning rate adam
     beta1 = 0.9  # beta1 for adam1
     clip = 1.0  # gradient clipping, max norm
 
     log_every = 50
     valid_every = 200
-    test_every = 400
+    test_every = 800
 
     # Gaussian Mixture Prior Network
     with_sentiment=True

@@ -14,14 +14,11 @@ from data_apis.data_utils import SWDADataLoader
 from models.seq2seq import Seq2Seq
 from models.cvae import CVAE
 from models.cvae_gmp import CVAE_GMP
-from helper import test_sentiment
-
-from helper import to_tensor, timeSince  # 将numpy转为tensor
+from helper import test_sentiment, write_predict_result_to_file, to_tensor# 将numpy转为tensor
 
 from experiments.metrics import Metrics
 from sample import evaluate
 from tensorboardX import SummaryWriter # install tensorboardX (pip install tensorboardX) before importing this package
-
 
 
 parentPath = os.path.abspath("..")
@@ -39,9 +36,10 @@ parser.add_argument('--train_data_dir', type=str, default='./data/train_data_wit
 
 parser.add_argument('--test_data_dir', type=str, default='./data/test_data.txt',
                     help='addr of data for testing, i.e. test titles')
-parser.add_argument('--expname', type=str, default='sentPoems',
+parser.add_argument('--expname', type=str, default='sentInput',
                     help='experiment name, for disinguishing different parameter settings')
-parser.add_argument('--model', type=str, default='mCVAE', help='name of the model')
+# parser.add_argument('--model', type=str, default='mCVAE', help='name of the model')
+parser.add_argument('--model', type=str, default='CVAE', help='name of the model')
 parser.add_argument('--visual', action='store_true', default=False, help='visualize training status in tensorboard')
 parser.add_argument('--reload_from', type=int, default=-1, help='reload from a trained ephoch')
 parser.add_argument('--gpu_id', type=int, default=0, help='GPU ID')
@@ -175,6 +173,7 @@ def get_user_input(rev_vocab, title_size):
 
 
 def main():
+
     # config for training
     config = Config()
     print("Normal train config:")
@@ -279,7 +278,7 @@ def main():
                     train_process(global_t=global_t, model=model, train_loader=train_loader, config=config, sentiment_data=with_sentiment)
                 if finish_train:
                     test_process(model=model, test_loader=test_loader, test_config=test_config, logger=logger)
-                    evaluate_process(model=model, valid_loader=valid_loader, log_start_time=log_start_time, global_t=global_t, epoch=epoch_id, logger=logger, tb_writer=tb_writer, api=api)
+                    # evaluate_process(model=model, valid_loader=valid_loader, log_start_time=log_start_time, global_t=global_t, epoch=epoch_id, logger=logger, tb_writer=tb_writer, api=api)
                     # save model after each epoch
                     save_model(model=model, epoch=epoch_id, global_t=global_t, log_start_time=log_start_time)
                     logger.info('Finish epoch %d, current min valid loss: %.4f \
@@ -322,20 +321,28 @@ def main():
 
     # forward_only 测试
     else:
-        expname = 'sentPoems'
-        time = '202101151847'
+        expname = 'sentInput'
+        time = '202101191105'
 
         model = load_model('./output/{}/{}/model_global_t_13596_epoch3.pckl'.format(expname, time))
         test_loader.epoch_init(test_config.batch_size, shuffle=False)
         if not os.path.exists('./output/{}/{}/test/'.format(expname, time)):
             os.mkdir('./output/{}/{}/test/'.format(expname, time))
-        output_file = open('./output/{}/{}/test/output.txt'
+        output_file = [open('./output/{}/{}/test/output_0.txt'
                            .format(expname, time),
-                           'w')
-
-        prior_list = [{0: 0, 1: 0, 2: 0}, {0: 0, 1: 0, 2: 0}, {0: 0, 1: 0, 2: 0}]
+                           'w'),
+                       open('./output/{}/{}/test/output_1.txt'
+                           .format(expname, time),
+                           'w'),
+                       open('./output/{}/{}/test/output_2.txt'
+                           .format(expname, time),
+                           'w')]
 
         poem_count = 0
+        predict_results = {0: [], 1: [], 2: []}
+        titles = {0: [], 1: [], 2: []}
+        sentiment_result = {0: [], 1: [], 2: []}
+        # Get all poem predictions
         while True:
             model.eval()
             batch = test_loader.next_batch_test()  # test data使用专门的batch
@@ -347,41 +354,48 @@ def main():
             title_list = batch  # batch size是1，一个batch写一首诗
             title_tensor = to_tensor(title_list)
             # test函数将当前batch对应的这首诗decode出来，记住每次decode的输入context是上一次的结果
-
             for i in range(3):
+                sentiment_label = np.zeros(1, dtype=np.int64)
+                sentiment_label[0] = int(i)
+                sentiment_label = to_tensor(sentiment_label)
+                output_poem, output_tokens = model.test(title_tensor, title_list, sentiment_label=sentiment_label)
 
-                output_file.write("\nGaussian No.{}\n".format(i))
-                output_poem, output_tokens = model.test(title_tensor, title_list, mask_type=str(i))
-                output_file.write(output_poem.strip().split('\n')[0] + '\n')  # 写标题
+                titles[i].append(output_poem.strip().split('\n')[0])
+                predict_results[i] += (np.array(output_tokens)[:, :7].tolist())
 
-                neg, neu, pos = test_sentiment(np.array(output_tokens)[:, :7], output_file)
-
-                prior_list[i][0] += neg
-                prior_list[i][1] += neu
-                prior_list[i][2] += pos
+        # Predict sentiment use the sort net
+        from collections import defaultdict
+        neg = defaultdict(int)
+        neu = defaultdict(int)
+        pos = defaultdict(int)
+        total = defaultdict(int)
+        for i in range(3):
+            _, neg[i], neu[i], pos[i] = test_sentiment(predict_results[i])
+            total[i] = neg[i] + neu[i] + pos[i]
 
         for i in range(3):
-            print("Use prior {}".format(i))
-            total = prior_list[i][0] + prior_list[i][1] + prior_list[i][2]
-            print("neg: %.2f%%, neu: %.2f%%, pos: %.2f%%" %
-                  (prior_list[i][0] * 100 / total, prior_list[i][1] * 100 / total, prior_list[i][2] * 100 / total))
+            print("%d%%\t%d%%\t%d%%" % (neg * 100 / total, neu * 100 / total, pos * 100 / total))
+
+        for i in range(3):
+            write_predict_result_to_file(titles[i], predict_results[i], sentiment_result[i], output_file[i])
+            output_file[i].close()
 
         print("Done testing")
 
 
-def train_process(global_t, model, train_loader, config, sentiment_data=False, mask_type=None):
+def train_process(global_t, model, train_loader, config, sentiment_data=False):
     model.train()
     loss_records = []
-    sentiment_mask = None
+    sentiment_label = None
     if sentiment_data:
         batch = train_loader.next_sentiment_batch()
         finish_train = False
         if batch is None:  # end of epoch
             finish_train = True
             return model, finish_train, None, global_t
-        title, context, target, target_lens, sentiment_mask = batch
-        title, context, target, target_lens, sentiment_mask = \
-            to_tensor(title), to_tensor(context), to_tensor(target), to_tensor(target_lens), to_tensor(sentiment_mask)
+        title, context, target, target_lens, sentiment_label = batch
+        title, context, target, target_lens, sentiment_label = \
+            to_tensor(title), to_tensor(context), to_tensor(target), to_tensor(target_lens), to_tensor(sentiment_label)
     else:
         batch = train_loader.next_batch()
         finish_train = False
@@ -393,10 +407,43 @@ def train_process(global_t, model, train_loader, config, sentiment_data=False, m
             to_tensor(title), to_tensor(context), to_tensor(target), to_tensor(target_lens)
 
     # global_t, title, context, target, target_lens,
-    loss_AE, global_t = model.train_AE(global_t, title, context, target, target_lens, sentiment_mask=sentiment_mask)  # 输入topic，last句，当前句，当前句长度
+    loss_AE, global_t = model.train_AE(global_t, title, context, target, target_lens, sentiment_label)  # 输入topic，last句，当前句，当前句长度
     loss_records.extend(loss_AE)
 
     return model, finish_train, loss_records, global_t
+
+
+def valid_process(global_t, model, valid_loader, valid_config, unlabeled_epoch,
+                  tb_writer, logger, cur_best_score):
+    valid_loader.epoch_init(valid_config.batch_size, shuffle=False)
+    model.eval()
+    loss_records = {}
+    while True:
+        batch = valid_loader.next_sentiment_batch()
+        if batch is None:  # end of epoch
+            break
+        title, context, target, target_lens, sentiment_label = batch
+        title, context, target, target_lens, sentiment_label = \
+            to_tensor(title), to_tensor(context), to_tensor(target), to_tensor(target_lens), to_tensor(
+                sentiment_label)
+        valid_loss = model.valid_AE(global_t, title, context, target, target_lens, sentiment_label)
+        for loss_name, loss_value in valid_loss:
+            v = loss_records.get(loss_name, [])
+            if loss_name == 'min_valid_loss' and loss_value < cur_best_score['min_valid_loss']:
+                cur_best_score['min_valid_loss'] = loss_value
+                cur_best_score['min_epoch'] = unlabeled_epoch
+                cur_best_score['min_step'] = global_t
+
+            v.append(loss_value)
+            loss_records[loss_name] = v
+
+    log = ""
+    for loss_name, loss_values in loss_records.items():
+        log = log + loss_name + ':%.4f  ' % (np.mean(loss_values))
+        if args.visual:
+            tb_writer.add_scalar(loss_name, np.mean(loss_values), global_t)
+
+    logger.info(log)
 
 
 def evaluate_process(model, valid_loader, log_start_time, global_t, epoch, logger, tb_writer, api):
@@ -433,13 +480,16 @@ def evaluate_process(model, valid_loader, log_start_time, global_t, epoch, logge
 def test_process(model, test_loader, test_config, logger):
     # 训练完一个epoch，用测试集的标题生成一次诗
 
-    test_loader.epoch_init(test_config.batch_size, shuffle=False)
-    prior_list = [{0: 0, 1: 0, 2: 0}, {0: 0, 1: 0, 2: 0}, {0: 0, 1: 0, 2: 0}]
+    test_loader.epoch_init(test_config.batch_size, shuffle=True)
 
     poem_count = 0
+    predict_results = {0: [], 1: [], 2: []}
     while True:
         model.eval()
         batch = test_loader.next_batch_test()  # test data使用专门的batch
+        if batch is None:
+            break
+        batch_size = batch.shape[0]
         poem_count += 1
         if poem_count % 10 == 0:
             print("Predicted {} poems".format(poem_count))
@@ -450,119 +500,33 @@ def test_process(model, test_loader, test_config, logger):
         # test函数将当前batch对应的这首诗decode出来，记住每次decode的输入context是上一次的结果
 
         for i in range(3):
-            output_poem, output_tokens = model.test(title_tensor, title_list, mask_type=str(i))
-            neg, neu, pos = test_sentiment(np.array(output_tokens)[:, :7])
+            # import pdb
+            # pdb.set_trace()
+            sentiment_label = np.zeros(batch_size, dtype=np.int64)
+            for id in range(batch_size):
+                sentiment_label[id] = int(i)
+            sentiment_label = to_tensor(sentiment_label)
+            output_poem, output_tokens = model.test(title_tensor, title_list, sentiment_label=sentiment_label)
 
-            prior_list[i][0] += neg
-            prior_list[i][1] += neu
-            prior_list[i][2] += pos
+            if poem_count % 80 == 0:
+                logger.info("Sentiment {} Poem {}\n".format(i, output_poem))
+
+            predict_results[i] += (np.array(output_tokens)[:, :7].tolist())
+
+    # Predict sentiment use the sort net
+    from collections import defaultdict
+    neg = defaultdict(int)
+    neu = defaultdict(int)
+    pos = defaultdict(int)
+    total = defaultdict(int)
+    for i in range(3):
+        _, neg[i], neu[i], pos[i] = test_sentiment(predict_results[i])
+        total[i] = neg[i] + neu[i] + pos[i]
 
     for i in range(3):
-        logger.info("Use prior {}".format(i))
-        total = prior_list[i][0] + prior_list[i][1] + prior_list[i][2]
-        logger.info("neg: %.2f%%, neu: %.2f%%, pos: %.2f%%" %
-              (prior_list[i][0] * 100 / total, prior_list[i][1] * 100 / total, prior_list[i][2] * 100 / total))
-
+        logger.info("%d%%\t%d%%\t%d%%" %
+              (neg[i] * 100 / total[i], neu[i] * 100 / total[i], pos[i] * 100 / total[i]))
     print("Done testing")
-
-
-def valid_process(global_t, model, valid_loader, valid_config, unlabeled_epoch,
-                  tb_writer, logger, cur_best_score):
-    valid_loader.epoch_init(valid_config.batch_size, shuffle=False)
-    model.eval()
-    loss_records = {}
-
-    while True:
-        batch = valid_loader.next_batch()
-        if batch is None:  # end of epoch
-            break
-
-        title, context, target, target_lens = batch
-        title, context, target, target_lens = \
-            to_tensor(title), to_tensor(context), to_tensor(target), to_tensor(target_lens)
-        valid_loss = model.valid_AE(global_t, title, context, target, target_lens)
-        for loss_name, loss_value in valid_loss:
-            v = loss_records.get(loss_name, [])
-            if loss_name == 'min_valid_loss' and loss_value < cur_best_score['min_valid_loss']:
-                cur_best_score['min_valid_loss'] = loss_value
-                cur_best_score['min_epoch'] = unlabeled_epoch
-                cur_best_score['min_step'] = global_t
-
-            v.append(loss_value)
-            loss_records[loss_name] = v
-
-    log = '\nEpoch {} global_t {} Validation:'.format(unlabeled_epoch, global_t)
-    for loss_name, loss_values in loss_records.items():
-        # import pdb
-        # pdb.set_trace()
-        if loss_name == 'valid_lead_loss':
-            continue
-        log = log + loss_name + ':%.4f  ' % (np.mean(loss_values))
-        if args.visual:
-            tb_writer.add_scalar(loss_name, np.mean(loss_values), global_t)
-
-    logger.info(log)
-
-
-def valid_process_sentiment(global_t, model, valid_poem_loader, valid_config, global_iter, num,
-                  tb_writer, logger, cur_best_score_labeled):
-    valid_poem_loader.epoch_init(valid_config.batch_size, shuffle=False)
-    model.eval()
-    loss_records = {}
-    while True:
-        batch = valid_poem_loader.next_sentiment_batch()
-        if batch is None:  # end of epoch
-            break
-
-        title, context, target, target_lens, sentiment_mask = batch
-        title, context, target, target_lens, sentiment_mask = \
-            to_tensor(title), to_tensor(context), to_tensor(target), to_tensor(target_lens), to_tensor(sentiment_mask)
-        valid_loss = model.valid(title, context, target, target_lens, sentiment_mask)
-        for loss_name, loss_value in valid_loss:
-            v = loss_records.get(loss_name, [])
-            v.append(loss_value)
-            loss_records[loss_name] = v
-
-    log = 'Valid: Global iter {} Validation\n'.format(global_iter)
-    for loss_name, loss_values in loss_records.items():
-        # import pdb
-        # pdb.set_trace()
-        if loss_name == 'valid_loss_AE' and np.mean(loss_values) < cur_best_score_labeled['min_valid_loss_label']:
-            log += "\nFOUND a new best valid loss in global %d, num %d\n" % (global_iter, num)
-            cur_best_score_labeled['min_valid_loss_label'] = np.mean(loss_values)
-            cur_best_score_labeled['min_global_itr_label'] = global_iter
-            cur_best_score_labeled['min_num_label'] = num
-
-        log = log + loss_name + ':%.4f  ' % (np.mean(loss_values))
-        if args.visual:
-            tb_writer.add_scalar(loss_name, np.mean(loss_values), global_t)
-
-    logger.info(log)
-
-
-# def update_poem_dataloader(sentiment_poem_corpus, config, global_itr):
-#     poem_1 = sentiment_poem_corpus.get("sent_1")  # 831  / 1    831
-#     poem_2 = sentiment_poem_corpus.get("sent_2")  # 4045 / 1    4045  4876
-#     poem_3 = sentiment_poem_corpus.get("sent_3")  # 6989 / 1.5  4660  4660
-#     poem_4 = sentiment_poem_corpus.get("sent_4")  # 4557 / 1.2  3800  4580
-#     poem_5 = sentiment_poem_corpus.get("sent_5")  # 934  /1.2   780
-#
-#     # 831 4045 4876 4199 776
-#     # n_neutral = int(4876 * (1 - global_itr / 5))
-#     # n_neutral = max(0, n_neutral)
-#     poems = random.sample(poem_1, 700)\
-#             + random.sample(poem_2, 4000)\
-#             + random.sample(poem_3, 4700)\
-#             + random.sample(poem_4, 4000)\
-#             + random.sample(poem_5, 700)
-#     valid_poems_len = len(poems) // 10
-#     train_poems = poems[:-valid_poems_len]
-#     valid_poems = poems[-valid_poems_len:]
-#     random.shuffle(train_poems)
-#     random.shuffle(valid_poems)
-#     train_poem_loader = SWDADataLoader("Sentiment_Poem_Train", train_poems, config)
-#     valid_poem_loader = SWDADataLoader("Sentiment_Poem_Valid", valid_poems, config)
-#     return train_poem_loader, valid_poem_loader
 
 
 if __name__ == "__main__":

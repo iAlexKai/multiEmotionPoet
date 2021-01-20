@@ -230,7 +230,7 @@ class SWDADataLoader(LongDataLoader):
         vec_outs = np.zeros((self.batch_size, self.max_de_len), dtype=np.int64)
         vec_out_lens = np.array(out_lens)
         # vec_out_sentiment_mask = np.zeros((self.batch_size, 5), dtype=np.int64)
-        vec_out_sentiment_mask = np.zeros((self.batch_size, 3), dtype=np.int64)
+        vec_out_sentiment_mask = np.zeros(self.batch_size, dtype=np.int64)
 
         # import pdb
         # pdb.set_trace()
@@ -238,7 +238,7 @@ class SWDADataLoader(LongDataLoader):
             vec_title[b_id, :] = np.array(titles[b_id])
             vec_outs[b_id, 0: vec_out_lens[b_id]] = out_utts[b_id][0: vec_out_lens[b_id]]
             vec_context[b_id, :] = np.array(context_utts[b_id])
-            vec_out_sentiment_mask[b_id][out_sentiment_mask[b_id]] = 1
+            vec_out_sentiment_mask[b_id] = out_sentiment_mask[b_id]
         return vec_title, vec_context, vec_outs, vec_out_lens, vec_out_sentiment_mask  # 将4个vector返回给模型训练
 
     def _prepare_test_batch(self, cur_grid):
